@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+.ruff_cache/
+.pytest_cache/
+
+# Generated outputs
+figures/
+output/
+*.prof
+
+# Local/editor
+.idea/
+.vscode/
+.DS_Store
+

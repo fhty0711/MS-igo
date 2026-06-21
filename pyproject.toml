@@ -1,0 +1,12 @@
+[project]
+name = "mgigo-scenario-planner"
+version = "0.1.0"
+description = "MGIGO scenario planner with constraint-DSL costs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jax[cuda13]>=0.6",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+]
+
