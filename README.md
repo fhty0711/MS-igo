@@ -12,7 +12,7 @@
 - 闭环 MPC 仿真
 - 通用可视化输出
 
-旧 IOC、MRS、汇报文件、旧 highway 脚本、旧经验 cost、视频输出都没有放进这个仓库。
+旧 IOC、MRS、汇报文件、旧 highway 脚本和视频输出都没有放进这个仓库。旧经验 cost 不作为旧链路保留，而是以 `highway_merge_baseline` 这个 baseline profile 的形式留在新架构里，用来和 wrapper / constraint-DSL cost 做 A/B 测试。
 
 ---
 
@@ -28,7 +28,8 @@
 
 | 名称 | 文件 | 说明 |
 |---|---|---|
-| `highway_merge` | `costs/highway_merge.py` | 使用 constraint-DSL 组织 objective 和安全/终端约束 |
+| `highway_merge` | `costs/highway_merge.py` | wrapper / constraint-DSL cost，默认使用 |
+| `highway_merge_baseline` | `costs/highway_merge_baseline.py` | 旧手写层级 cost，对照测试用 |
 
 运行后输出：
 
@@ -48,6 +49,12 @@ git clone https://github.com/fhty0711/igo.git
 cd igo
 uv sync
 JAX_PLATFORMS=cuda uv run python run_mgigo_scenario.py highway_merge highway_merge
+```
+
+如果要测试旧手写 baseline cost：
+
+```bash
+JAX_PLATFORMS=cuda uv run python run_mgigo_scenario.py highway_merge highway_merge_baseline
 ```
 
 如果不显式写场景和 cost，也会默认运行当前 highway 场景：
@@ -310,7 +317,7 @@ constraints: g(x, ctx) <= 0
 - `Robust`
 - `DRO`
 
-当前 highway cost 在 `costs/highway_merge.py` 中，注册了三个 agent cost：
+当前默认 highway wrapper cost 在 `costs/highway_merge.py` 中，注册了三个 agent cost：
 
 ```python
 ego_cost(...)
@@ -344,6 +351,11 @@ COST_PROFILES = {
         highway_merge.ego_cost,
         highway_merge.front_cost,
         highway_merge.rear_cost,
+    ),
+    "highway_merge_baseline": (
+        highway_merge_baseline.ego_cost,
+        highway_merge_baseline.front_cost,
+        highway_merge_baseline.rear_cost,
     ),
 }
 ```
@@ -528,9 +540,8 @@ uv run python run_mgigo_scenario.py borrow_overtake borrow_overtake
 
 ## 7. 注意事项
 
-- `costs/highway_merge.py` 现在是新的 constraint-DSL cost，不是旧经验 cost。
-- 旧经验 cost 没有放进这个仓库。
+- `costs/highway_merge.py` 是新的 wrapper / constraint-DSL cost。
+- `costs/highway_merge_baseline.py` 是旧手写层级 cost，只用于 A/B 对照。
 - `figures/` 被 `.gitignore` 忽略，运行后生成的视频不会自动提交。
 - 如果另一台电脑没有 CUDA，可以去掉 `JAX_PLATFORMS=cuda`，但运行会慢很多。
 - 如果 `uv sync` 在 Windows 原生环境遇到 JAX/CUDA 问题，建议改用 WSL2 Ubuntu。
-
