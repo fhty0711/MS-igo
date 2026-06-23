@@ -15,14 +15,16 @@
 
 ## 1. 项目能做什么
 
-当前主要实验是 **双向两车道借道超车**：
+当前有两个场景
+1. 高速并道场景
 
-- 自车在右侧车道向前行驶。
-- 前方有慢车。
-- 左侧为对向车道，有对向车驶来。
-- 自车需要判断是否借对向车道完成超车，或者在风险过高时等待。
+2. 双向两车道借道超车：
+  - 自车在右侧车道向前行驶。
+  - 前方有慢车。
+  - 左侧为对向车道，有对向车驶来。
+  - 自车需要判断是否借对向车道完成超车，或者在风险过高时等待。
 
-这个场景用于验证：
+借道超车场景用于验证：
 
 - safe case：对向车距离足够远，算法是否能完成借道超车并回道。
 - blocked case：对向车太近，算法是否能拒绝危险超车。
@@ -44,15 +46,13 @@
 
 ### MGIGO 黑箱优化
 
-MGIGO 在控制序列 block 上采样、评价和更新分布，不要求 cost 可微。因此可以直接处理：
+MGIGO 不要求 cost 可微。因此可以直接处理：
 
 - `max/min` robustness
 - 分段逻辑
 - hard safety gate
 - STL-style temporal constraints
 - 非光滑 cost transformation
-
-### STL-style robustness cost
 
 借道超车 cost 中包含多类 STL-style 时序约束：
 
@@ -66,7 +66,6 @@ MGIGO 在控制序列 block 上采样、评价和更新分布，不要求 cost �
 | 超车完成 | rolling eventually / progress |
 | 回道 | rolling return-to-lane progress |
 
-这里没有依赖外部 STL parser，而是直接手写 STL robustness semantics，并把 violation 写成 `g(x) <= 0` 的形式交给 cost wrapper 或 matched baseline。
 
 ### Cost Profile 对比
 
@@ -83,8 +82,6 @@ MGIGO 在控制序列 block 上采样、评价和更新分布，不要求 cost �
 ---
 
 ## 3. 快速运行
-
-推荐在 WSL2 + CUDA GPU 中运行。
 
 ```bash
 git clone https://github.com/fhty0711/igo.git
@@ -138,7 +135,6 @@ reports/wrapper_validation_report/wrapper_validation_report.docx
 reports/wrapper_validation_report.zip
 ```
 
-HTML 报告包含可播放视频，适合直接发给同事查看。
 
 关键结果：
 
@@ -166,7 +162,7 @@ min_gap_while_borrowing = 232.6 m
 min_TTC_while_borrowing = 9.92 s
 ```
 
-这说明 wrapper 所表达的 constraint-to-cost transformation 可以更可靠地保持 hard safety priority。matched baseline 与 wrapper 一致，说明效果来自数学变换本身；wrapper 的工程优势是把这套变换结构化、参数化、可复用。
+这说明 wrapper 所表达的 constraint-to-cost transformation 可以更可靠地保持 hard safety priority。matched baseline 与 wrapper 一致，wrapper 的工程优势是把这套变换结构化、参数化、可复用。
 
 ---
 
@@ -203,7 +199,7 @@ figures/cost_profile_comparison/overview_metrics.png
 figures/cost_profile_comparison/overview_trajectories.png
 ```
 
-生成可分享报告：
+生成报告：
 
 ```bash
 python generate_wrapper_report.py
@@ -255,37 +251,9 @@ config.py                      # 全局求解和车辆参数
 
 ---
 
-## 7. 调用关系
 
-```text
-run_mgigo_scenario.py
-  -> scenarios.get_scenario(...)
-  -> costs.get_cost_functions(...)
-  -> backends.get_backend(...)
-  -> GenericScenarioBackend.step()
-  -> planner.plan()
-  -> BlockDecoder
-  -> mmog_igo_rne_blocks_solver()
-  -> selected control blocks
-  -> scenario_runtime.advance_one_macro_step()
-  -> viz_utils.render_agents_panel()
-  -> figures/*.png / figures/*.mp4
-```
 
-cost 对候选轨迹的计算流程：
-
-```text
-joint_sample_flat
-  -> BlockDecoder.decode()
-  -> dense_rollout_from_decisions()
-  -> objective + STL-style violations
-  -> wrapper / baseline / matched transformation
-  -> scalar black-box cost
-```
-
----
-
-## 8. 新增场景
+## 7. 新增场景
 
 新增场景通常需要：
 
