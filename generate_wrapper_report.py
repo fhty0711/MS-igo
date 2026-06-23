@@ -169,7 +169,7 @@ def build_html(asset_paths: dict[str, str], rows: list[dict[str, str]]) -> Path:
   <ul>
     <li>场景：<code>borrow_overtake_safe</code>, <code>borrow_overtake_blocked</code>, <code>borrow_overtake_critical</code></li>
     <li>求解器：同一 MGIGO / MPC 闭环求解器，同一随机种子。</li>
-    <li>底层项：三组 cost 使用同一批 objective / STL-style violation 函数。</li>
+    <li>底层项：三组 cost 使用同一批 objective / STL robustness violation 函数。</li>
     <li>判据：return tolerance = 0.6 m；借道期间 gap >= 28 m 或 TTC >= 1.5 s 判为 conflict-free。</li>
   </ul>
 
@@ -255,7 +255,7 @@ def build_docx(rows: list[dict[str, str]]) -> Path:
     for item in [
         "场景：borrow_overtake_safe, borrow_overtake_blocked, borrow_overtake_critical。",
         "求解器：同一 MGIGO / MPC 闭环求解器，同一随机种子。",
-        "底层项：三组 cost 使用同一批 objective / STL-style violation 函数。",
+        "底层项：三组 cost 使用同一批 objective / STL robustness violation 函数。",
         "判据：return tolerance = 0.6 m；借道期间 gap >= 28 m 或 TTC >= 1.5 s 判为 conflict-free。",
     ]:
         doc.add_paragraph(item, style="List Bullet")

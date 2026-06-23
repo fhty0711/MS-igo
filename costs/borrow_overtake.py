@@ -1,14 +1,15 @@
 """Borrow-lane overtaking cost profile.
 
-Safety is expressed as simple STL robustness costs:
+Hard safety is expressed with explicit Signal Temporal Logic robustness
+formulas:
 
-- G[0, T] no footprint overlap with other vehicles.
-- G[0, T] ego vehicle stays inside the road boundaries.
+- ``G[0,T] no_footprint_overlap``.
+- ``G[0,T] inside_road``.
+- ``G[0,T] (blocked_gap -> not_cross_centerline)``.
 
-Task performance remains conventional: speed tracking, smooth controls,
-progress past the slow lead vehicle, and returning to the ego lane. The cost is
-kept scenario-specific because the pass/return semantics are different from the
-highway merge case.
+Task performance and maneuver gates keep the validated scalar exact-penalty
+scale: speed tracking, smooth controls, oncoming gap/TTC margin, progress past
+the slow lead vehicle, and returning to the ego lane.
 """
 
 import jax
@@ -26,6 +27,7 @@ from decision_layout import BlockDecoder
 from scenarios import get_scenario
 from .common import dense_rollout_from_decisions
 from .constraint_dsl import Deterministic, build
+from .stl import all_of, always, implies, predicate, violation
 
 
 _SCENARIO = get_scenario("borrow_overtake_critical")
@@ -57,6 +59,7 @@ _PASS_EVENT_CLEARANCE = 24.0
 _PASS_PROGRESS_PER_HORIZON = 14.0
 _MIN_BORROW_LANE_SPEED = 8.0
 _CENTERLINE_HARD_GAP = 0.10
+_ACTIVATION_EPS = 1e-3
 
 
 def _decode_joint_sample(joint_sample_flat):
@@ -78,22 +81,12 @@ def _shared_context(joint_sample_flat, context_arr):
     }
 
 
-def _stl_always_violation(robustness):
-    """Return signed STL G violation for rho(t) >= 0.
-
-    The result is ``max_t -rho(t)``. It is <= 0 when the STL formula is
-    satisfied for the whole horizon and > 0 when any time step violates it.
-    This is the form expected by the exact-penalty wrapper.
-    """
-    return jnp.max(-robustness)
-
-
 def _pair_clearance_robustness(traj_a, traj_b, length, width, safe_gap):
-    """STL robustness proxy for pairwise rectangular/elliptic clearance.
+    """Signed robustness trace for pairwise rectangular/elliptic clearance.
 
     Positive values mean the pair is outside the safety ellipse at each time.
     Negative values mean overlap. This mirrors pairwise_footprint_overlap_cost
-    but returns a signed robustness trace for G[0,T] reasoning.
+    but returns a trace that can be consumed by STL formulas.
     """
     eff_len = length + safe_gap
     eff_wid = width
@@ -109,6 +102,15 @@ def _pair_clearance_robustness(traj_a, traj_b, length, width, safe_gap):
     rho_a = jax.vmap(robustness_in_body_frame)(traj_a, traj_b)
     rho_b = jax.vmap(robustness_in_body_frame)(traj_b, traj_a)
     return jnp.minimum(rho_a, rho_b)
+
+
+def _activation_robustness(weight):
+    """Convert a [0, 1] gate into an STL predicate robustness.
+
+    Positive values mean the gate is active. Zero-valued gates are treated as
+    inactive so implication formulas do not constrain unrelated maneuver modes.
+    """
+    return weight - _ACTIVATION_EPS
 
 
 def _ego_objective(x, ctx):
@@ -158,38 +160,67 @@ def _ego_objective(x, ctx):
 
 
 def _ego_stl_footprint_collision_violation(x, ctx):
-    """Highest priority STL: G[0,T] ego must avoid physical footprint overlap."""
+    """STL formula: G[0,T] ego must avoid physical footprint overlap."""
     dense_traj = ctx["dense_traj"]
     ego_traj = dense_traj[:, _EGO.state_index, :]
     slow_traj = dense_traj[:, _SLOW.state_index, :]
     oncoming_traj = dense_traj[:, _ONCOMING.state_index, :]
 
-    rho_slow = _pair_clearance_robustness(
-        ego_traj, slow_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
+    phi = always(
+        all_of(
+            (
+                predicate(
+                    "ego_clear_of_slow",
+                    lambda _x, _ctx: _pair_clearance_robustness(
+                        ego_traj,
+                        slow_traj,
+                        _GEOM.length,
+                        _GEOM.width,
+                        _FOOTPRINT_HARD_GAP,
+                    ),
+                ),
+                predicate(
+                    "ego_clear_of_oncoming",
+                    lambda _x, _ctx: _pair_clearance_robustness(
+                        ego_traj,
+                        oncoming_traj,
+                        _GEOM.length,
+                        _GEOM.width,
+                        _FOOTPRINT_HARD_GAP,
+                    ),
+                ),
+            ),
+            name="ego_clear_of_all_agents",
+        ),
+        name="G ego_clear_of_all_agents",
     )
-    rho_oncoming = _pair_clearance_robustness(
-        ego_traj, oncoming_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
-    )
-    return jnp.maximum(
-        _stl_always_violation(rho_slow),
-        _stl_always_violation(rho_oncoming),
-    )
+    return violation(phi, x, ctx)
 
 
 def _ego_stl_road_boundary_violation(x, ctx):
-    """STL: G[0,T] ego footprint should stay inside road boundaries."""
+    """STL formula: G[0,T] ego footprint should stay inside road boundaries."""
     ego_y = ctx["dense_traj"][:, _EGO.state_index, 1]
     half_w = 0.5 * _GEOM.width
-    rho_lower = ego_y - (_ROAD_MIN_Y + half_w)
-    rho_upper = (_ROAD_MAX_Y - half_w) - ego_y
-    return jnp.maximum(
-        _stl_always_violation(rho_lower),
-        _stl_always_violation(rho_upper),
+    phi = always(
+        all_of(
+            (
+                predicate("above_lower_road_edge", lambda _x, _ctx: ego_y - (_ROAD_MIN_Y + half_w)),
+                predicate("below_upper_road_edge", lambda _x, _ctx: (_ROAD_MAX_Y - half_w) - ego_y),
+            ),
+            name="inside_road",
+        ),
+        name="G inside_road",
     )
+    return violation(phi, x, ctx)
 
 
 def _ego_oncoming_gap_violation(x, ctx):
-    """Second priority STL: borrowed-lane oncoming TTC/distance margin."""
+    """Borrowed-lane oncoming TTC/distance margin.
+
+    The underlying safety predicate is ``G(borrow_lane -> gap/TTC safe)``.
+    Its scalar violation keeps the pre-STL continuous occupancy gate so the
+    exact-penalty scale remains comparable to the validated baseline.
+    """
     dense_traj = ctx["dense_traj"]
     ego_traj = dense_traj[:, _EGO.state_index, :]
     oncoming_traj = dense_traj[:, _ONCOMING.state_index, :]
@@ -234,7 +265,7 @@ def _ego_oncoming_lane_occupancy_violation(x, ctx):
 
 
 def _ego_centerline_clearance_violation(x, ctx):
-    """Hard gate: keep the ego footprint off the centerline when blocked.
+    """STL formula: G[0,T] blocked gap implies footprint clears centerline.
 
     Occupancy of the oncoming lane was previously measured from the vehicle
     center, so blocked cases could still drift close enough for the footprint
@@ -262,11 +293,19 @@ def _ego_centerline_clearance_violation(x, ctx):
     footprint_crossing = (
         ego_y + 0.5 * _GEOM.width + _CENTERLINE_HARD_GAP - _LANE_MID_Y
     ) / _SCENARIO.road.lane_width
-    return danger_activation * jnp.max(footprint_crossing)
+    phi = always(
+        implies(
+            predicate("blocked_before_pass_phase", lambda _x, _ctx: _activation_robustness(danger_activation)),
+            predicate("footprint_below_centerline", lambda _x, _ctx: -footprint_crossing),
+            name="blocked_implies_centerline_clear",
+        ),
+        name="G blocked_implies_centerline_clear",
+    )
+    return violation(phi, x, ctx)
 
 
 def _ego_oncoming_lane_dwell_violation(x, ctx):
-    """STL: while borrowing the oncoming lane, keep moving instead of waiting.
+    """STL formula: G[0,T] pass-required borrowing implies v >= v_min.
 
     The previous cost allowed a pathological local behavior in the safe case:
     enter the oncoming lane and almost stop there. This rule targets that
@@ -292,7 +331,7 @@ def _ego_oncoming_lane_dwell_violation(x, ctx):
 
 
 def _ego_following_gap_violation(x, ctx):
-    """Lower priority STL: keep a reasonable same-lane gap behind slow lead."""
+    """Lower priority following-gap rule behind the slow lead."""
     dense_traj = ctx["dense_traj"]
     ego_traj = dense_traj[:, _EGO.state_index, :]
     slow_traj = dense_traj[:, _SLOW.state_index, :]
@@ -308,7 +347,7 @@ def _ego_following_gap_violation(x, ctx):
 
 
 def _ego_completion_violation(x, ctx):
-    """Task STL: if safe enough, make finite-horizon passing progress.
+    """Task rule: if safe enough, make finite-horizon passing progress.
 
     A full pass requirement inside every six-second MPC horizon is too strong
     at the beginning of the maneuver. This rolling-horizon rule asks for a
@@ -343,7 +382,7 @@ def _ego_completion_violation(x, ctx):
 
 
 def _ego_return_lane_violation(x, ctx):
-    """Task STL: once the pass is nearly complete, return to the ego lane.
+    """Task rule: once the pass is nearly complete, return to the ego lane.
 
     The trigger is based on current/predicted pass progress, not the initial
     oncoming gap. In later MPC steps the oncoming gap naturally shrinks, but
@@ -417,23 +456,35 @@ def _oncoming_objective(x, ctx):
 
 
 def _slow_collision_violation(x, ctx):
-    """STL: short-horizon slow lead vehicle should not overlap ego."""
+    """STL formula: G[0,H] slow lead should not overlap ego."""
     slow_traj = ctx["dense_traj"][:SAFETY_CHECK_STEPS, _SLOW.state_index, :]
     ego_traj = ctx["dense_traj"][:SAFETY_CHECK_STEPS, _EGO.state_index, :]
-    rho = _pair_clearance_robustness(
-        slow_traj, ego_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
+    phi = always(
+        predicate(
+            "slow_clear_of_ego",
+            lambda _x, _ctx: _pair_clearance_robustness(
+                slow_traj, ego_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
+            ),
+        ),
+        name="G slow_clear_of_ego",
     )
-    return _stl_always_violation(rho)
+    return violation(phi, x, ctx)
 
 
 def _oncoming_collision_violation(x, ctx):
-    """STL: short-horizon oncoming vehicle should not overlap ego."""
+    """STL formula: G[0,H] oncoming vehicle should not overlap ego."""
     oncoming_traj = ctx["dense_traj"][:SAFETY_CHECK_STEPS, _ONCOMING.state_index, :]
     ego_traj = ctx["dense_traj"][:SAFETY_CHECK_STEPS, _EGO.state_index, :]
-    rho = _pair_clearance_robustness(
-        oncoming_traj, ego_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
+    phi = always(
+        predicate(
+            "oncoming_clear_of_ego",
+            lambda _x, _ctx: _pair_clearance_robustness(
+                oncoming_traj, ego_traj, _GEOM.length, _GEOM.width, _FOOTPRINT_HARD_GAP
+            ),
+        ),
+        name="G oncoming_clear_of_ego",
     )
-    return _stl_always_violation(rho)
+    return violation(phi, x, ctx)
 
 
 _slow_base_cost = build(

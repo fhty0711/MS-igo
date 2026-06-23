@@ -25,7 +25,7 @@
 <body>
 <main>
   <h1>Constraint Wrapper Validation Report</h1>
-  <p class="muted">Generated: 2026-06-23 21:15:35</p>
+  <p class="muted">Generated: 2026-06-23 23:34:42</p>
 
   <div class="card">
     <p><b>结论摘要：</b>matched baseline 不调用 wrapper API，但手写复现 wrapper 的 log/saturation/hard/tunable/priority 变换。测试中 matched 与 wrapper 行为和指标一致，说明效果来自这套 constraint-to-cost transformation；wrapper 的优势是把这套变换结构化、参数化、可复用，降低手写层级和饱和顺序出错风险。</p>
@@ -35,7 +35,7 @@
   <ul>
     <li>场景：<code>borrow_overtake_safe</code>, <code>borrow_overtake_blocked</code>, <code>borrow_overtake_critical</code></li>
     <li>求解器：同一 MGIGO / MPC 闭环求解器，同一随机种子。</li>
-    <li>底层项：三组 cost 使用同一批 objective / STL-style violation 函数。</li>
+    <li>底层项：三组 cost 使用同一批 objective / STL robustness violation 函数。</li>
     <li>判据：return tolerance = 0.6 m；借道期间 gap >= 28 m 或 TTC >= 1.5 s 判为 conflict-free。</li>
   </ul>
 
@@ -50,7 +50,7 @@
   </table>
 
   <h2>3. 结果表</h2>
-  <table><thead><tr><th>scenario</th><th>cost</th><th>pass+return</th><th>returned</th><th>conflict-free while borrowing</th><th>min gap while borrowing (m)</th><th>min TTC while borrowing (s)</th><th>final y (m)</th><th>final v (m/s)</th><th>final lead (m)</th></tr></thead><tbody><tr><td>safe</td><td>wrapper</td><td>True</td><td>True</td><td>True</td><td>81.4</td><td>2.71</td><td>0.32</td><td>16.8</td><td>48.0</td></tr><tr><td>safe</td><td>old baseline</td><td>True</td><td>True</td><td>True</td><td>139.7</td><td>4.27</td><td>-0.19</td><td>18.0</td><td>116.1</td></tr><tr><td>safe</td><td>matched baseline</td><td>True</td><td>True</td><td>True</td><td>81.4</td><td>2.71</td><td>0.32</td><td>16.8</td><td>48.0</td></tr><tr><td>blocked</td><td>wrapper</td><td>False</td><td>True</td><td>True</td><td>148.0</td><td>5.60</td><td>0.33</td><td>10.4</td><td>-24.5</td></tr><tr><td>blocked</td><td>old baseline</td><td>False</td><td>True</td><td>True</td><td>inf</td><td>inf</td><td>0.14</td><td>9.8</td><td>-14.7</td></tr><tr><td>blocked</td><td>matched baseline</td><td>False</td><td>True</td><td>True</td><td>148.0</td><td>5.60</td><td>0.33</td><td>10.4</td><td>-24.5</td></tr><tr><td>critical</td><td>wrapper</td><td>False</td><td>True</td><td>True</td><td>232.6</td><td>9.92</td><td>-0.55</td><td>8.6</td><td>-26.0</td></tr><tr><td>critical</td><td>old baseline</td><td>True</td><td>True</td><td>False</td><td>-74.8</td><td>-2.20</td><td>0.28</td><td>17.9</td><td>109.8</td></tr><tr><td>critical</td><td>matched baseline</td><td>False</td><td>True</td><td>True</td><td>232.6</td><td>9.92</td><td>-0.55</td><td>8.6</td><td>-26.0</td></tr></tbody></table>
+  <table><thead><tr><th>scenario</th><th>cost</th><th>pass+return</th><th>returned</th><th>conflict-free while borrowing</th><th>min gap while borrowing (m)</th><th>min TTC while borrowing (s)</th><th>final y (m)</th><th>final v (m/s)</th><th>final lead (m)</th></tr></thead><tbody><tr><td>safe</td><td>wrapper</td><td>True</td><td>True</td><td>True</td><td>57.9</td><td>1.85</td><td>0.34</td><td>16.9</td><td>61.0</td></tr><tr><td>safe</td><td>old baseline</td><td>True</td><td>True</td><td>True</td><td>164.7</td><td>5.01</td><td>-0.50</td><td>17.9</td><td>124.8</td></tr><tr><td>safe</td><td>matched baseline</td><td>True</td><td>True</td><td>True</td><td>57.9</td><td>1.85</td><td>0.34</td><td>16.9</td><td>61.0</td></tr><tr><td>blocked</td><td>wrapper</td><td>False</td><td>True</td><td>True</td><td>174.7</td><td>6.21</td><td>0.44</td><td>10.5</td><td>-25.4</td></tr><tr><td>blocked</td><td>old baseline</td><td>False</td><td>True</td><td>True</td><td>inf</td><td>inf</td><td>-0.26</td><td>10.5</td><td>-14.3</td></tr><tr><td>blocked</td><td>matched baseline</td><td>False</td><td>True</td><td>True</td><td>174.7</td><td>6.21</td><td>0.44</td><td>10.5</td><td>-25.4</td></tr><tr><td>critical</td><td>wrapper</td><td>False</td><td>True</td><td>True</td><td>234.0</td><td>10.44</td><td>-0.17</td><td>9.5</td><td>-26.1</td></tr><tr><td>critical</td><td>old baseline</td><td>True</td><td>True</td><td>False</td><td>-16.9</td><td>-0.50</td><td>-0.06</td><td>18.1</td><td>119.7</td></tr><tr><td>critical</td><td>matched baseline</td><td>False</td><td>True</td><td>True</td><td>234.0</td><td>10.44</td><td>-0.17</td><td>9.5</td><td>-26.1</td></tr></tbody></table>
   <p>关键现象：critical 场景中 old baseline 完成超车，但借道期间 min gap 和 min TTC 为负，表示对向冲突；wrapper 与 matched baseline 均选择安全等待/放弃。</p>
 
   <h2>4. 总览图</h2>

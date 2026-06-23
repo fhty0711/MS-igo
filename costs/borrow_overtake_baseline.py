@@ -1,6 +1,6 @@
 """Baseline hand-written cost profile for borrow-lane overtaking.
 
-Safety is expressed as simple STL robustness costs:
+Safety is expressed with the same STL robustness semantics as the wrapper cost:
 
 - G[0, T] no footprint overlap with other vehicles.
 - G[0, T] ego vehicle stays inside the road boundaries.
@@ -27,6 +27,7 @@ from config import (
 from decision_layout import BlockDecoder
 from scenarios import get_scenario
 from .common import dense_rollout_from_decisions, hierarchical_cost
+from .stl import always, predicate, violation
 
 
 _SCENARIO = get_scenario("borrow_overtake_critical")
@@ -81,8 +82,9 @@ def _shared_context(joint_sample_flat, context_arr):
 
 
 def _stl_always_violation(robustness):
-    """Return signed STL G violation for rho(t) >= 0."""
-    return jnp.max(-robustness)
+    """Return the signed violation of ``G[0,T] rho >= 0``."""
+    phi = always(predicate("legacy_trace_predicate", lambda _x, _ctx: robustness))
+    return violation(phi, None, None)
 
 
 def _hard_exact_penalty(g_raw):
