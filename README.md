@@ -54,17 +54,7 @@ MGIGO 不要求 cost 可微。因此可以直接处理：
 - STL-style temporal constraints
 - 非光滑 cost transformation
 
-借道超车 cost 中包含多类 STL-style 时序约束：
-
-| 约束 | STL-style 形式 |
-|---|---|
-| 避碰 | `G[0,T] no_collision` |
-| 道路边界 | `G[0,T] inside_road` |
-| 对向车安全 | `G[0,T] (in_oncoming_lane -> gap/TTC safe)` |
-| blocked 中心线约束 | `G[0,T] (blocked_gap -> not_cross_centerline)` |
-| 对向车道低速滞留 | `G[0,T] (borrow_lane -> v >= v_min)` |
-| 超车完成 | rolling eventually / progress |
-| 回道 | rolling return-to-lane progress |
+借道超车 cost 中包含多类 STL-style 时序约束：G[0,T] no_collision等
 
 
 ### Cost Profile 对比
