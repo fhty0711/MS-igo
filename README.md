@@ -282,3 +282,7 @@ uv run python run_mgigo_scenario.py <scenario_name> <cost_profile>
 - Pillow
 
 `pyproject.toml` 中记录了当前运行所需的核心依赖。
+
+## 10. 参考
+本项目参考了https://github.com/qlp71/IOC_AGV和https://github.com/Konsteidinoeevich/MGIGO
+
