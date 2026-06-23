@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from config import N_MPC_STEPS
 from planner import plan
 from viz_utils import generic_legend_handles, render_agents_panel
 
@@ -117,4 +116,5 @@ class GenericScenarioBackend:
 
     def animation_title(self, idx):
         """Title used for each animation frame."""
-        return f"{self.scenario.title}  [step {idx:02d}/{N_MPC_STEPS}]"
+        n_steps = self.scenario.n_mpc_steps or "default"
+        return f"{self.scenario.title}  [step {idx:02d}/{n_steps}]"

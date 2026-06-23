@@ -2,13 +2,37 @@
 
 from typing import Callable, Dict, Optional, Tuple
 
-from . import highway_merge, highway_merge_baseline
+from . import (
+    borrow_overtake,
+    borrow_overtake_baseline,
+    borrow_overtake_matched,
+    highway_merge,
+    highway_merge_baseline,
+)
 
 CostFunctions = Tuple[Callable, ...]
 DEFAULT_COST_PROFILE = "highway_merge"
 
 
 COST_PROFILES: Dict[str, CostFunctions] = {
+    # Borrow-lane overtaking with STL safety layers.
+    "borrow_overtake": (
+        borrow_overtake.ego_cost,
+        borrow_overtake.slow_lead_cost,
+        borrow_overtake.oncoming_cost,
+    ),
+    # Same borrow-overtake terms, combined by the original hand-written hierarchy.
+    "borrow_overtake_baseline": (
+        borrow_overtake_baseline.ego_cost,
+        borrow_overtake_baseline.slow_lead_cost,
+        borrow_overtake_baseline.oncoming_cost,
+    ),
+    # Hand-written assembler matched to the wrapper transformation.
+    "borrow_overtake_matched": (
+        borrow_overtake_matched.ego_cost,
+        borrow_overtake_matched.slow_lead_cost,
+        borrow_overtake_matched.oncoming_cost,
+    ),
     # Wrapper / constraint-DSL cost. This is the default profile.
     "highway_merge": (
         highway_merge.ego_cost,

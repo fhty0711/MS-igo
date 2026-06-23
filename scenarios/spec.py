@@ -135,6 +135,8 @@ class ScenarioSpec:
     backend: str = "generic_scenario"
     state_dim: int = 6
     control_horizon: int = 12
+    n_mpc_steps: int | None = None
+    snap_frames: Tuple[int, int, int] | None = None
     road: RoadSpec = RoadSpec(3.5, (0.0, 3.5))
     vehicle_geometry: VehicleGeometrySpec = VehicleGeometrySpec(5.0, 2.0, 3.0)
     notes: Tuple[str, ...] = ()
@@ -235,6 +237,16 @@ class ScenarioSpec:
             raise ValueError(
                 f"Scenario {self.name!r} must provide exactly 3 snap labels, "
                 f"got {len(self.snap_labels)}"
+            )
+        if self.n_mpc_steps is not None and self.n_mpc_steps <= 0:
+            raise ValueError(
+                f"Scenario {self.name!r} n_mpc_steps must be positive, "
+                f"got {self.n_mpc_steps}"
+            )
+        if self.snap_frames is not None and len(self.snap_frames) != 3:
+            raise ValueError(
+                f"Scenario {self.name!r} snap_frames must contain exactly 3 "
+                f"indices, got {self.snap_frames}"
             )
 
     @property

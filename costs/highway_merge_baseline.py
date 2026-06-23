@@ -1,7 +1,8 @@
-"""Archived legacy baseline cost profile for the original highway merge scenario.
+"""Baseline hand-written cost profile for the highway merge scenario.
 
-This file is not imported by the active runner. New cost design uses the
-Constran-style constraint DSL path in the project-root ``costs/`` package.
+This module keeps the original hierarchical cost design available inside the
+new scenario/cost registry, so it can be compared against the wrapper /
+constraint-DSL profile without restoring the old fixed highway runner.
 """
 
 import jax

@@ -70,6 +70,8 @@ def main(scenario_name="highway_merge", cost_profile=None):
     backend_cls = get_backend(scenario.backend)
     backend = backend_cls(scenario, cost_profile)
     output_prefix = _output_prefix_for(scenario, cost_profile)
+    n_mpc_steps = scenario.n_mpc_steps or N_MPC_STEPS
+    snap_frames = scenario.snap_frames or tuple(SNAP_FRAMES)
 
     print("初始化 JAX...")
     _ = jax.devices()
@@ -79,19 +81,19 @@ def main(scenario_name="highway_merge", cost_profile=None):
     print(f"场景：{scenario.name} - {scenario.description}")
     print(f"代价：{cost_profile}")
     print(f"后端：{scenario.backend}")
-    print(backend.describe_start(N_MPC_STEPS))
+    print(backend.describe_start(n_mpc_steps))
 
-    for step in range(N_MPC_STEPS):
+    for step in range(n_mpc_steps):
         key, subkey = random.split(key)
         result = backend.step(subkey, step)
 
-        if step % 5 == 0 or step == N_MPC_STEPS - 1:
+        if step % 5 == 0 or step == n_mpc_steps - 1:
             print(backend.progress_line(step, result))
 
     print(backend.final_summary())
 
     print("\n生成 3 列对比图...")
-    snap_idxs = [min(f, N_MPC_STEPS - 1) for f in SNAP_FRAMES]
+    snap_idxs = [min(f, n_mpc_steps - 1) for f in snap_frames]
     snap_labels = scenario.snap_labels
     fig, axes = plt.subplots(1, 3, figsize=(16, 2.8), gridspec_kw={"wspace": 0.04})
     fig.patch.set_facecolor("#0a1120")
@@ -124,7 +126,7 @@ def main(scenario_name="highway_merge", cost_profile=None):
 
     def _animate(frame):
         ax_a.cla()
-        idx = min(frame, N_MPC_STEPS - 1)
+        idx = min(frame, n_mpc_steps - 1)
         backend.render_panel(
             ax_a,
             idx,
@@ -134,7 +136,7 @@ def main(scenario_name="highway_merge", cost_profile=None):
         )
         return (ax_a,)
 
-    anim = FuncAnimation(fig_a, _animate, frames=N_MPC_STEPS, interval=250, blit=False)
+    anim = FuncAnimation(fig_a, _animate, frames=n_mpc_steps, interval=250, blit=False)
     mp4_path = os.path.join(ROOT, "figures", f"{output_prefix}.mp4")
     gif_path = os.path.join(ROOT, "figures", f"{output_prefix}.gif")
     try:
