@@ -197,6 +197,56 @@ def test_signalized_intersection_visual_metrics_have_expected_keys():
         raise AssertionError(metrics)
 
 
+def test_signalized_intersection_comparison_runner_contract():
+    import numpy as np
+
+    import compare_signalized_intersection_profiles as compare
+    from scenarios import get_scenario
+
+    expected_scenarios = (
+        "signalized_intersection_easy_pass",
+        "signalized_intersection_must_stop",
+        "signalized_intersection_critical",
+    )
+    expected_costs = (
+        "signalized_intersection",
+        "signalized_intersection_no_chance",
+        "signalized_intersection_single_mode",
+        "signalized_intersection_soft_dilemma",
+    )
+    if compare.DEFAULT_SCENARIOS != expected_scenarios:
+        raise AssertionError(compare.DEFAULT_SCENARIOS)
+    if compare.DEFAULT_COSTS != expected_costs:
+        raise AssertionError(compare.DEFAULT_COSTS)
+
+    scenario = get_scenario("signalized_intersection")
+    ego = np.array(
+        [
+            [0.0, 0.0, 10.0, 0.0, 0.0, 0.0],
+            [30.0, 0.0, 2.0, 0.0, 0.0, 0.0],
+            [33.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    metrics = compare._compute_metrics(scenario, {"ego": ego})
+    expected_keys = {
+        "mode",
+        "final_x",
+        "final_y",
+        "final_v",
+        "min_clearance",
+        "risk_quantile",
+        "red_legal",
+        "no_blocking",
+        "cleared_intersection",
+        "stopped_before_line",
+    }
+    if set(metrics) != expected_keys:
+        raise AssertionError(metrics)
+    if metrics["mode"] != "stop":
+        raise AssertionError(metrics)
+
+
 def test_signalized_intersection_render_smoke():
     import matplotlib
     matplotlib.use("Agg")
@@ -234,5 +284,6 @@ if __name__ == "__main__":
     test_signalized_intersection_ablation_profiles_are_registered_and_finite()
     test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
     test_signalized_intersection_visual_metrics_have_expected_keys()
+    test_signalized_intersection_comparison_runner_contract()
     test_signalized_intersection_render_smoke()
     print("signalized intersection helper tests ok")
