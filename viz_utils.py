@@ -84,6 +84,75 @@ def _draw_road(ax, x_min, x_max, road=None):
         sp.set_visible(False)
 
 
+def _draw_signalized_intersection(ax, scenario, x_min, x_max):
+    """Draw intersection-specific geometry over the generic ego approach road."""
+    from costs import signalized_intersection as si
+
+    road_min = scenario.road.road_min_y
+    road_max = scenario.road.road_max_y
+    cross_min = -18.0
+    cross_max = 18.0
+    ax.set_ylim(cross_min, cross_max)
+    ax.add_patch(
+        mpatches.Rectangle(
+            (si.INTERSECTION_ENTRY_X, cross_min),
+            si.INTERSECTION_EXIT_X - si.INTERSECTION_ENTRY_X,
+            cross_max - cross_min,
+            facecolor="#26384f",
+            edgecolor="#ffffff",
+            linewidth=1.0,
+            alpha=0.45,
+            zorder=1,
+        )
+    )
+    ax.plot(
+        [si.STOP_LINE_X, si.STOP_LINE_X],
+        [road_min - 0.5, road_max + 0.5],
+        color="#ffdf6e",
+        lw=2.4,
+        zorder=4,
+    )
+    ax.plot(
+        [si.CROSS_LANE_X, si.CROSS_LANE_X],
+        [cross_min, cross_max],
+        color="#d9e6f2",
+        lw=1.0,
+        ls="--",
+        alpha=0.65,
+        zorder=1,
+    )
+    lamp_x = min(max(si.STOP_LINE_X + 2.5, x_min + 4.0), x_max - 4.0)
+    lamp_y = road_max + 0.45
+    ax.scatter([lamp_x], [lamp_y], s=80, color="#ffd166", edgecolors="white", zorder=9)
+    ax.text(
+        lamp_x + 1.0,
+        lamp_y,
+        "yellow -> red",
+        color="white",
+        fontsize=7,
+        va="center",
+        zorder=9,
+    )
+
+
+def _draw_cross_traffic_cloud(ax, scenario):
+    """Draw exogenous cross-traffic behavior samples for intersection scenarios."""
+    from costs import signalized_intersection as si
+    import jax.numpy as jnp
+
+    samples = np.asarray(si._cross_traffic_noise(None, (30,)))
+    n_steps = scenario.control_horizon * SUB_STEPS
+    for xi in samples:
+        mode = int(xi[si.XI_MODE])
+        color = {
+            si.MODE_OBEY: "#4cc9f0",
+            si.MODE_YELLOW_RUSH: "#ffd166",
+            si.MODE_RED_RUN: "#ef476f",
+        }.get(mode, "#ffffff")
+        tr = np.asarray(si._cross_traj_for_xi(jnp.asarray(xi), n_steps))
+        ax.plot(tr[:, 0], tr[:, 1], color=color, lw=0.8, alpha=0.16, zorder=2)
+
+
 def _smooth_xy(points, samples_per_segment=8):
     """Catmull-Rom smoothing for display only; endpoints are preserved."""
     pts = np.asarray(points, dtype=float)
@@ -129,6 +198,9 @@ def render_agents_panel(
     x_min = ego_x - 8.0
     x_max = x_min + x_win
     _draw_road(ax, x_min, x_max, scenario.road)
+    if scenario.name == "signalized_intersection":
+        _draw_signalized_intersection(ax, scenario, x_min, x_max)
+        _draw_cross_traffic_cloud(ax, scenario)
 
     micro_per_macro = SUB_STEPS
     color_by_agent = {

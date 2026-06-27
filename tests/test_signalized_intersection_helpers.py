@@ -79,9 +79,36 @@ def test_signalized_intersection_cost_profile_contract():
         raise AssertionError(f"cost should be finite, got {value}")
 
 
+def test_signalized_intersection_render_smoke():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from scenarios import get_scenario
+    from viz_utils import render_agents_panel
+
+    scenario = get_scenario("signalized_intersection")
+    states_by_agent = {"ego": scenario.initial_states[0]}
+    fig, ax = plt.subplots(figsize=(5, 3))
+    render_agents_panel(
+        ax,
+        scenario,
+        states_by_agent=states_by_agent,
+        trajectories_by_agent={"ego": []},
+        history_by_agent={"ego": [scenario.initial_states[0]]},
+        focus_agent="ego",
+        x_win=44.0,
+        title="smoke",
+    )
+    if len(ax.patches) == 0:
+        raise AssertionError("expected vehicle/intersection patches")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
+    test_signalized_intersection_render_smoke()
     print("signalized intersection helper tests ok")
