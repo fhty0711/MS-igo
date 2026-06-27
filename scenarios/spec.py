@@ -139,6 +139,7 @@ class ScenarioSpec:
     snap_frames: Tuple[int, int, int] | None = None
     road: RoadSpec = RoadSpec(3.5, (0.0, 3.5))
     vehicle_geometry: VehicleGeometrySpec = VehicleGeometrySpec(5.0, 2.0, 3.0)
+    context_values: Tuple[float, ...] = ()
     notes: Tuple[str, ...] = ()
 
     def __post_init__(self):
@@ -233,6 +234,11 @@ class ScenarioSpec:
                 f"Scenario {self.name!r} reference_index values {reference_indices} "
                 f"exceed v_refs length {len(self.v_refs)}"
             )
+        context_values = np.asarray(self.context_values, dtype=np.float64)
+        if context_values.ndim != 1 or not np.all(np.isfinite(context_values)):
+            raise ValueError(
+                f"Scenario {self.name!r} context_values must be a finite 1D sequence"
+            )
         if len(self.snap_labels) != 3:
             raise ValueError(
                 f"Scenario {self.name!r} must provide exactly 3 snap labels, "
@@ -308,8 +314,12 @@ class ScenarioSpec:
         return len(self.v_refs)
 
     @property
+    def context_extra_dim(self) -> int:
+        return len(self.context_values)
+
+    @property
     def context_total_dim(self) -> int:
-        return self.context_state_dim + self.context_ref_dim
+        return self.context_state_dim + self.context_ref_dim + self.context_extra_dim
 
     @property
     def solver_spec(self) -> SolverSpec:

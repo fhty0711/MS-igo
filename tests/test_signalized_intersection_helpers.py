@@ -54,6 +54,24 @@ def test_signalized_intersection_variant_timing_order():
         raise AssertionError("must-stop should be long enough to show waiting")
 
 
+def test_signalized_intersection_variant_timing_reaches_cost_context():
+    import jax.numpy as jnp
+    from costs import signalized_intersection as cost
+    from scenarios import get_scenario
+
+    stop = get_scenario("signalized_intersection_must_stop")
+    context = jnp.concatenate(
+        [
+            jnp.asarray(stop.initial_states.reshape(-1), dtype=jnp.float32),
+            jnp.asarray(stop.v_refs, dtype=jnp.float32),
+            jnp.asarray(stop.context_values, dtype=jnp.float32),
+        ]
+    )
+    red_start = float(cost._red_start_from_context_arr(context))
+    if abs(red_start - 1.6) > 1e-6:
+        raise AssertionError(f"expected must-stop red start 1.6, got {red_start}")
+
+
 def test_cross_traffic_noise_is_multimodal_and_small_by_default():
     import jax
     from costs import signalized_intersection as cost
@@ -180,6 +198,7 @@ if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
     test_signalized_intersection_variants_are_registered()
     test_signalized_intersection_variant_timing_order()
+    test_signalized_intersection_variant_timing_reaches_cost_context()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()

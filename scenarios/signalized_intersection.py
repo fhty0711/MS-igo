@@ -85,6 +85,7 @@ def _make_scenario(
         snap_frames=snap_frames,
         road=RoadSpec(LANE_W, (EGO_LANE_Y,)),
         vehicle_geometry=VehicleGeometrySpec(VEH_L, VEH_W, SAFE_GAP),
+        context_values=(yellow_start_s, red_start_s),
         notes=(
             "cross_traffic_exogenous",
             f"stop_line_x={STOP_LINE_X}",

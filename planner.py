@@ -195,6 +195,7 @@ def plan(
     context_arr = jnp.concatenate([
         jnp.asarray(current_states.reshape(-1), dtype=jnp.float32),
         jnp.asarray(v_refs, dtype=jnp.float32),
+        jnp.asarray(scenario.context_values, dtype=jnp.float32),
     ])
     fitness_fn = make_fitness_fn(cost_profile)
 

@@ -16,6 +16,8 @@ _SOLVER_SPEC = _SCENARIO.solver_spec
 _SOLVER_WIDTH = max(_SOLVER_SPEC.block_dims)
 _STATE_DIM = _SCENARIO.state_dim
 _CTX_STATE_DIM = _SCENARIO.context_state_dim
+_CTX_REF_DIM = _SCENARIO.context_ref_dim
+_CTX_EXTRA_OFFSET = _CTX_STATE_DIM + _CTX_REF_DIM
 _EGO = _SCENARIO.agents[0]
 _GEOM = _SCENARIO.vehicle_geometry
 
@@ -39,6 +41,19 @@ XI_SPEED_SCALE = 2
 XI_LATERAL_OFFSET = 3
 
 DEV_N_SAMPLES = 40
+
+
+def _yellow_start_from_context_arr(context_arr):
+    if context_arr.shape[0] > _CTX_EXTRA_OFFSET:
+        return context_arr[_CTX_EXTRA_OFFSET]
+    return jnp.asarray(YELLOW_START_S, dtype=jnp.float32)
+
+
+def _red_start_from_context_arr(context_arr):
+    red_idx = _CTX_EXTRA_OFFSET + 1
+    if context_arr.shape[0] > red_idx:
+        return context_arr[red_idx]
+    return jnp.asarray(RED_START_S, dtype=jnp.float32)
 
 
 def _cross_traffic_noise(key, shape):
@@ -242,7 +257,7 @@ def _ego_red_light_violation(x, ctx):
     del x
     ego = _ego_traj(ctx)
     t = _time_grid(ego.shape[0])
-    red = t >= RED_START_S
+    red = t >= _red_start_from_context_arr(ctx["context_arr"])
     before_stop = ego[:, 0] <= STOP_LINE_X
     cleared = ego[:, 0] >= INTERSECTION_EXIT_X
     legal = jnp.logical_or(before_stop, cleared)
