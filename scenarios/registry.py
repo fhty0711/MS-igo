@@ -13,7 +13,12 @@ from .borrow_overtake import (
     make_scenario as make_borrow_overtake,
 )
 from .highway_merge import make_scenario as make_highway_merge
-from .signalized_intersection import make_scenario as make_signalized_intersection
+from .signalized_intersection import (
+    make_critical_scenario as make_signalized_intersection_critical,
+    make_easy_pass_scenario as make_signalized_intersection_easy_pass,
+    make_must_stop_scenario as make_signalized_intersection_must_stop,
+    make_scenario as make_signalized_intersection,
+)
 from .spec import ScenarioSpec
 
 
@@ -24,6 +29,9 @@ SCENARIO_FACTORIES: Dict[str, Callable[[], ScenarioSpec]] = {
     "borrow_overtake_safe": make_borrow_overtake_safe,
     "highway_merge": make_highway_merge,
     "signalized_intersection": make_signalized_intersection,
+    "signalized_intersection_critical": make_signalized_intersection_critical,
+    "signalized_intersection_easy_pass": make_signalized_intersection_easy_pass,
+    "signalized_intersection_must_stop": make_signalized_intersection_must_stop,
 }
 
 SCENARIOS: Dict[str, ScenarioSpec] = {

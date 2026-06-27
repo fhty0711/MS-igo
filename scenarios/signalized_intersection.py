@@ -35,17 +35,28 @@ YELLOW_DURATION_S = 2.4
 RED_START_S = YELLOW_START_S + YELLOW_DURATION_S
 
 
-def make_scenario() -> ScenarioSpec:
-    ego0 = state(EGO_X0, EGO_Y0, EGO_V0)
+def _make_scenario(
+    *,
+    name,
+    title_suffix,
+    ego_x0,
+    ego_v0,
+    yellow_start_s,
+    yellow_duration_s,
+    snap_frames=(0, 14, 29),
+    n_mpc_steps=30,
+) -> ScenarioSpec:
+    ego0 = state(ego_x0, EGO_Y0, ego_v0)
+    red_start_s = yellow_start_s + yellow_duration_s
 
     return ScenarioSpec(
-        name="signalized_intersection",
-        title="MGIGO Signalized Intersection Dilemma",
+        name=name,
+        title=f"MGIGO Signalized Intersection Dilemma - {title_suffix}",
         description=(
-            "ego approaches a yellow-light intersection with probabilistic "
-            "cross traffic"
+            f"{title_suffix}: ego approaches a yellow-light intersection with "
+            "probabilistic cross traffic"
         ),
-        output_prefix="mgigo_signalized_intersection",
+        output_prefix=f"mgigo_{name}",
         cost_profile="signalized_intersection",
         initial_states=np.stack([ego0]),
         v_refs=np.array([EGO_REF_V], dtype=np.float64),
@@ -70,8 +81,8 @@ def make_scenario() -> ScenarioSpec:
         ),
         backend="generic_scenario",
         control_horizon=CONTROL_HORIZON,
-        n_mpc_steps=18,
-        snap_frames=(0, 8, 17),
+        n_mpc_steps=n_mpc_steps,
+        snap_frames=snap_frames,
         road=RoadSpec(LANE_W, (EGO_LANE_Y,)),
         vehicle_geometry=VehicleGeometrySpec(VEH_L, VEH_W, SAFE_GAP),
         notes=(
@@ -80,7 +91,51 @@ def make_scenario() -> ScenarioSpec:
             f"intersection_entry_x={INTERSECTION_ENTRY_X}",
             f"intersection_exit_x={INTERSECTION_EXIT_X}",
             f"cross_lane_x={CROSS_LANE_X}",
-            f"yellow_start_s={YELLOW_START_S}",
-            f"red_start_s={RED_START_S}",
+            f"yellow_start_s={yellow_start_s}",
+            f"red_start_s={red_start_s}",
         ),
+    )
+
+
+def make_easy_pass_scenario() -> ScenarioSpec:
+    return _make_scenario(
+        name="signalized_intersection_easy_pass",
+        title_suffix="Easy Pass",
+        ego_x0=0.0,
+        ego_v0=15.0,
+        yellow_start_s=0.8,
+        yellow_duration_s=3.2,
+    )
+
+
+def make_must_stop_scenario() -> ScenarioSpec:
+    return _make_scenario(
+        name="signalized_intersection_must_stop",
+        title_suffix="Must Stop",
+        ego_x0=4.0,
+        ego_v0=11.0,
+        yellow_start_s=0.2,
+        yellow_duration_s=1.4,
+    )
+
+
+def make_critical_scenario() -> ScenarioSpec:
+    return _make_scenario(
+        name="signalized_intersection_critical",
+        title_suffix="Critical Dilemma",
+        ego_x0=0.0,
+        ego_v0=14.0,
+        yellow_start_s=0.6,
+        yellow_duration_s=2.4,
+    )
+
+
+def make_scenario() -> ScenarioSpec:
+    return _make_scenario(
+        name="signalized_intersection",
+        title_suffix="Critical Dilemma",
+        ego_x0=0.0,
+        ego_v0=14.0,
+        yellow_start_s=0.6,
+        yellow_duration_s=2.4,
     )

@@ -23,6 +23,24 @@ def test_signalized_intersection_scenario_contract():
         raise AssertionError(scenario.cost_profile)
 
 
+def test_signalized_intersection_variants_are_registered():
+    from scenarios import get_scenario
+
+    expected = {
+        "signalized_intersection_easy_pass",
+        "signalized_intersection_must_stop",
+        "signalized_intersection_critical",
+    }
+    for name in expected:
+        scenario = get_scenario(name)
+        if scenario.name != name:
+            raise AssertionError((name, scenario.name))
+        if scenario.cost_profile != "signalized_intersection":
+            raise AssertionError((name, scenario.cost_profile))
+        if scenario.n_mpc_steps is None or scenario.n_mpc_steps < 28:
+            raise AssertionError(f"{name} should run long enough to show the full dilemma")
+
+
 def test_cross_traffic_noise_is_multimodal_and_small_by_default():
     import jax
     from costs import signalized_intersection as cost
@@ -107,6 +125,7 @@ def test_signalized_intersection_render_smoke():
 
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
+    test_signalized_intersection_variants_are_registered()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
