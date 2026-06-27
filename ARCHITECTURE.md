@@ -8,6 +8,7 @@ Legacy fixed-highway scripts are archived under `archive/legacy/`.
 ```bash
 uv run python run_mgigo_scenario.py
 uv run python run_mgigo_scenario.py highway_merge highway_merge
+uv run python run_mgigo_scenario.py signalized_intersection signalized_intersection
 ```
 
 The first argument selects a registered scenario. The second argument selects a
@@ -40,12 +41,18 @@ run_mgigo_scenario.py
   count, initial states, references, decisions, blocks, and drawing labels here.
 - `scenarios/registry.py`: imports scenario factories and registers scenario
   names.
+- `scenarios/signalized_intersection.py`: single-ego yellow-light intersection
+  dilemma scenario. Cross traffic is exogenous and probabilistic; it lives in
+  the cost and visualization layer, not in `ScenarioSpec.agents`.
 - `costs/constraint_dsl.py`: Constran-style builders for objective functions
   and directly evaluated constraints (`g(x, ctx) <= 0`) including
   deterministic, chance, robust, and DRO forms.
 - `costs/<profile>.py`: one cost profile per file. The active design direction
   is to express each agent's objective and constraints through the DSL and
   return one scalar black-box objective per agent.
+- `costs/signalized_intersection.py`: prioritized STL-style ego cost for the
+  intersection dilemma, including hard red-light/no-blocking rules and a
+  tunable chance constraint over cross-traffic behavior samples.
 - `costs/registry.py`: registers independently selectable cost profiles.
 - `decision_layout.py`: decodes sampled MGIGO blocks into named decision
   sequences and encodes/warms them back into block arrays.
@@ -70,6 +77,14 @@ run_mgigo_scenario.py
 
 ```bash
 uv run python run_mgigo_scenario.py <new_scenario> <cost_profile>
+```
+
+For full MGIGO experiment validation in this workspace, run through the WSL2
+Ubuntu CUDA environment rather than Windows CPU. The current GPU environment can
+be invoked with:
+
+```bash
+wsl.exe -d Ubuntu-22.04 bash -lc 'cd /mnt/d/claude_workspace1/igo && JAX_PLATFORMS=cuda /root/.venvs/tcmgigo-jaxgpu/bin/python run_mgigo_scenario.py signalized_intersection signalized_intersection'
 ```
 
 The active path should not import from `archive/legacy/`.
