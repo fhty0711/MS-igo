@@ -41,6 +41,19 @@ def test_signalized_intersection_variants_are_registered():
             raise AssertionError(f"{name} should run long enough to show the full dilemma")
 
 
+def test_signalized_intersection_variant_timing_order():
+    from scenarios import get_scenario
+
+    easy = get_scenario("signalized_intersection_easy_pass")
+    stop = get_scenario("signalized_intersection_must_stop")
+    critical = get_scenario("signalized_intersection_critical")
+
+    if not easy.initial_states[0, 2] > stop.initial_states[0, 2]:
+        raise AssertionError("easy pass should start faster than must-stop")
+    if not stop.n_mpc_steps >= critical.n_mpc_steps:
+        raise AssertionError("must-stop should be long enough to show waiting")
+
+
 def test_cross_traffic_noise_is_multimodal_and_small_by_default():
     import jax
     from costs import signalized_intersection as cost
@@ -166,6 +179,7 @@ def test_signalized_intersection_render_smoke():
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
     test_signalized_intersection_variants_are_registered()
+    test_signalized_intersection_variant_timing_order()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
