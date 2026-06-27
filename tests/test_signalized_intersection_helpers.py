@@ -247,6 +247,41 @@ def test_signalized_intersection_comparison_runner_contract():
         raise AssertionError(metrics)
 
 
+def test_signalized_intersection_report_rows_render():
+    import generate_signalized_intersection_report as report
+
+    rows = [
+        {
+            "scenario": "signalized_intersection_must_stop",
+            "cost_profile": "signalized_intersection",
+            "mode": "stop",
+            "final_x": "33.2",
+            "final_v": "0.0",
+            "min_clearance": "12.3",
+            "risk_quantile": "-8.0",
+            "red_legal": "True",
+            "no_blocking": "True",
+            "cleared_intersection": "False",
+            "stopped_before_line": "True",
+        }
+    ]
+    markdown = report._build_markdown(rows, generated="TEST")
+    html = report._build_html(rows, generated="TEST")
+    required = (
+        "black-box",
+        "multi-modal",
+        "signalized_intersection_no_chance",
+        "signalized_intersection_single_mode",
+        "signalized_intersection_soft_dilemma",
+        "must_stop",
+    )
+    for token in required:
+        if token not in markdown:
+            raise AssertionError(token)
+    if "<table>" not in html or "Signalized Intersection" not in html:
+        raise AssertionError(html[:200])
+
+
 def test_signalized_intersection_render_smoke():
     import matplotlib
     matplotlib.use("Agg")
@@ -285,5 +320,6 @@ if __name__ == "__main__":
     test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
     test_signalized_intersection_visual_metrics_have_expected_keys()
     test_signalized_intersection_comparison_runner_contract()
+    test_signalized_intersection_report_rows_render()
     test_signalized_intersection_render_smoke()
     print("signalized intersection helper tests ok")
