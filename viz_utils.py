@@ -135,13 +135,17 @@ def _draw_signalized_intersection(ax, scenario, x_min, x_max):
     )
 
 
-def _draw_cross_traffic_cloud(ax, scenario):
+def _draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
     """Draw exogenous cross-traffic behavior samples for intersection scenarios."""
     from costs import signalized_intersection as si
     import jax.numpy as jnp
 
     samples = np.asarray(si._cross_traffic_noise(None, (30,)))
     n_steps = scenario.control_horizon * SUB_STEPS
+    critical_xi = None
+    if ego_traj is not None:
+        metrics = si.estimate_visual_metrics(ego_traj, n_samples=30)
+        critical_xi = np.asarray(metrics["critical_sample"], dtype=float)
     for xi in samples:
         mode = int(xi[si.XI_MODE])
         color = {
@@ -150,7 +154,46 @@ def _draw_cross_traffic_cloud(ax, scenario):
             si.MODE_RED_RUN: "#ef476f",
         }.get(mode, "#ffffff")
         tr = np.asarray(si._cross_traj_for_xi(jnp.asarray(xi), n_steps))
-        ax.plot(tr[:, 0], tr[:, 1], color=color, lw=0.8, alpha=0.16, zorder=2)
+        is_critical = critical_xi is not None and np.allclose(xi, critical_xi)
+        ax.plot(
+            tr[:, 0],
+            tr[:, 1],
+            color=color,
+            lw=2.0 if is_critical else 0.8,
+            alpha=0.65 if is_critical else 0.16,
+            zorder=5 if is_critical else 2,
+        )
+
+
+def _draw_intersection_metrics(ax, ego_traj):
+    """Draw display-only signalized-intersection metrics."""
+    from costs import signalized_intersection as si
+
+    metrics = si.estimate_visual_metrics(ego_traj, n_samples=40)
+    text = (
+        f"mode: {metrics['mode']}\n"
+        f"min clearance: {metrics['min_clearance']:.1f} m\n"
+        f"risk q90: {metrics['risk_quantile']:.1f}\n"
+        f"red legal: {metrics['red_legal']}\n"
+        f"no blocking: {metrics['no_blocking']}"
+    )
+    ax.text(
+        0.012,
+        0.965,
+        text,
+        transform=ax.transAxes,
+        color="white",
+        fontsize=7.5,
+        va="top",
+        ha="left",
+        bbox={
+            "boxstyle": "round,pad=0.35",
+            "facecolor": "#0a1120",
+            "edgecolor": "#445566",
+            "alpha": 0.82,
+        },
+        zorder=12,
+    )
 
 
 def _smooth_xy(points, samples_per_segment=8):
@@ -195,12 +238,19 @@ def render_agents_panel(
     focus_state = states_by_agent[focus_agent]
     geometry = scenario.vehicle_geometry
     ego_x = float(focus_state[0])
-    x_min = ego_x - 8.0
-    x_max = x_min + x_win
+    if scenario.name.startswith("signalized_intersection"):
+        from costs import signalized_intersection as si
+
+        x_win = max(x_win, 76.0)
+        center = 0.5 * (si.STOP_LINE_X + si.INTERSECTION_EXIT_X)
+        x_min = center - 0.5 * x_win
+        x_max = center + 0.5 * x_win
+    else:
+        x_min = ego_x - 8.0
+        x_max = x_min + x_win
     _draw_road(ax, x_min, x_max, scenario.road)
-    if scenario.name == "signalized_intersection":
+    if scenario.name.startswith("signalized_intersection"):
         _draw_signalized_intersection(ax, scenario, x_min, x_max)
-        _draw_cross_traffic_cloud(ax, scenario)
 
     micro_per_macro = SUB_STEPS
     color_by_agent = {
@@ -246,6 +296,11 @@ def render_agents_panel(
             best_xy = _smooth_xy(best[:, :2], samples_per_segment=8)
             ax.plot(best_xy[:, 0], best_xy[:, 1], color="#9ff3bd",
                     lw=2.2, alpha=0.95, zorder=4)
+            if scenario.name.startswith("signalized_intersection"):
+                _draw_cross_traffic_cloud(ax, scenario, ego_traj=best)
+                _draw_intersection_metrics(ax, best)
+    elif scenario.name.startswith("signalized_intersection"):
+        _draw_cross_traffic_cloud(ax, scenario)
 
     for idx, agent in enumerate(scenario.agents):
         state = states_by_agent[agent.name]

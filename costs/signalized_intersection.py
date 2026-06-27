@@ -1,6 +1,7 @@
 """Constraint-DSL cost profile for the signalized intersection dilemma."""
 
 import jax.numpy as jnp
+import numpy as np
 
 from config import DT_C, VEH_L, VEH_W
 from decision_layout import BlockDecoder
@@ -133,6 +134,92 @@ def _axis_aligned_pair_penetration(a_traj, b_traj):
     min_dx = VEH_L + _GEOM.safe_gap
     min_dy = VEH_W + 0.5 * _GEOM.safe_gap
     return jnp.maximum(min_dx - dx, min_dy - dy)
+
+
+def classify_ego_mode(ego_traj_np):
+    """Classify a displayed ego trajectory as stop, pass, or undecided."""
+    ego = np.asarray(ego_traj_np, dtype=float)
+    if ego.size == 0:
+        return "undecided"
+    x = ego[:, 0]
+    v = ego[:, 2]
+    stopped_before = np.any((x <= STOP_LINE_X) & (v <= 1.0))
+    cleared = np.max(x) >= INTERSECTION_EXIT_X
+    blocking = np.any(
+        (x > INTERSECTION_ENTRY_X)
+        & (x < INTERSECTION_EXIT_X)
+        & (v <= 1.0)
+    )
+    if stopped_before and not cleared:
+        return "stop"
+    if cleared and not blocking:
+        return "pass"
+    return "undecided"
+
+
+def _np_cross_traj_for_xi(xi, n_steps):
+    tr = _cross_traj_for_xi(jnp.asarray(xi), n_steps)
+    return np.asarray(tr, dtype=float)
+
+
+def _np_pair_clearance(a_traj, b_traj):
+    a = np.asarray(a_traj, dtype=float)
+    b = np.asarray(b_traj, dtype=float)
+    n = min(len(a), len(b))
+    if n == 0:
+        return float("inf")
+    dx = np.abs(a[:n, 0] - b[:n, 0])
+    dy = np.abs(a[:n, 1] - b[:n, 1])
+    min_dx = VEH_L + _GEOM.safe_gap
+    min_dy = VEH_W + 0.5 * _GEOM.safe_gap
+    penetration = np.maximum(min_dx - dx, min_dy - dy)
+    return float(-np.max(penetration))
+
+
+def _np_red_legal(ego_traj):
+    ego = np.asarray(ego_traj, dtype=float)
+    if len(ego) == 0:
+        return True
+    t = np.arange(len(ego), dtype=float) * DT_C
+    red = t >= RED_START_S
+    legal = (ego[:, 0] <= STOP_LINE_X) | (ego[:, 0] >= INTERSECTION_EXIT_X)
+    return bool(np.all(~red | legal))
+
+
+def _np_no_blocking(ego_traj):
+    ego = np.asarray(ego_traj, dtype=float)
+    if len(ego) == 0:
+        return True
+    x = ego[:, 0]
+    v = ego[:, 2]
+    blocking = (x > INTERSECTION_ENTRY_X) & (x < INTERSECTION_EXIT_X) & (v < 1.0)
+    return bool(not np.any(blocking))
+
+
+def estimate_visual_metrics(ego_traj_np, n_samples=60):
+    """Compute display-only intersection metrics from one ego trajectory."""
+    ego = np.asarray(ego_traj_np, dtype=float)
+    samples = np.asarray(_cross_traffic_noise(None, (n_samples,)), dtype=float)
+    if len(ego) == 0:
+        clearances = np.array([float("inf")])
+        critical = samples[0] if len(samples) else np.zeros(4)
+    else:
+        clearances = np.array(
+            [
+                _np_pair_clearance(ego, _np_cross_traj_for_xi(xi, len(ego)))
+                for xi in samples
+            ],
+            dtype=float,
+        )
+        critical = samples[int(np.argmin(clearances))]
+    return {
+        "mode": classify_ego_mode(ego),
+        "min_clearance": float(np.min(clearances)),
+        "risk_quantile": float(np.quantile(-clearances, 0.9)),
+        "red_legal": _np_red_legal(ego),
+        "no_blocking": _np_no_blocking(ego),
+        "critical_sample": critical,
+    }
 
 
 def _cross_traffic_risk_violation(x, xi, ctx):

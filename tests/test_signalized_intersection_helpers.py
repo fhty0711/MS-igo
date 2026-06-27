@@ -97,6 +97,46 @@ def test_signalized_intersection_cost_profile_contract():
         raise AssertionError(f"cost should be finite, got {value}")
 
 
+def test_signalized_intersection_metrics_classify_stop_pass_and_blocking():
+    import numpy as np
+    from costs import signalized_intersection as cost
+
+    stop_traj = np.array([[30.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
+    pass_traj = np.array([[56.0, 0.0, 6.0, 0.0, 0.0, 0.0]])
+    block_traj = np.array([[42.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
+
+    if cost.classify_ego_mode(stop_traj) != "stop":
+        raise AssertionError("expected stop")
+    if cost.classify_ego_mode(pass_traj) != "pass":
+        raise AssertionError("expected pass")
+    if cost.classify_ego_mode(block_traj) != "undecided":
+        raise AssertionError("expected undecided/blocking")
+
+
+def test_signalized_intersection_visual_metrics_have_expected_keys():
+    import numpy as np
+    from costs import signalized_intersection as cost
+
+    ego_traj = np.array(
+        [
+            [30.0, 0.0, 4.0, 0.0, 0.0, 0.0],
+            [34.0, 0.0, 2.0, 0.0, 0.0, 0.0],
+            [38.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        ]
+    )
+    metrics = cost.estimate_visual_metrics(ego_traj, n_samples=12)
+    expected = {
+        "mode",
+        "min_clearance",
+        "risk_quantile",
+        "red_legal",
+        "no_blocking",
+        "critical_sample",
+    }
+    if set(metrics) != expected:
+        raise AssertionError(metrics)
+
+
 def test_signalized_intersection_render_smoke():
     import matplotlib
     matplotlib.use("Agg")
@@ -129,5 +169,7 @@ if __name__ == "__main__":
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
+    test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
+    test_signalized_intersection_visual_metrics_have_expected_keys()
     test_signalized_intersection_render_smoke()
     print("signalized intersection helper tests ok")
