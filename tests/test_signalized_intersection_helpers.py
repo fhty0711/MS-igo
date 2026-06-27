@@ -54,8 +54,34 @@ def test_no_blocking_intersection_violation():
         raise AssertionError("stopping inside conflict box should block")
 
 
+def test_signalized_intersection_cost_profile_contract():
+    import jax.numpy as jnp
+    from costs import get_cost_functions
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection")
+    cost_functions = get_cost_functions("signalized_intersection")
+    if len(cost_functions) != scenario.n_agents:
+        raise AssertionError(
+            f"expected {scenario.n_agents} cost function, got {len(cost_functions)}"
+        )
+
+    width = max(scenario.solver_spec.block_dims)
+    sample = jnp.zeros((scenario.solver_spec.n_blocks * width,), dtype=jnp.float32)
+    context = jnp.concatenate(
+        [
+            jnp.asarray(scenario.initial_states.reshape(-1), dtype=jnp.float32),
+            jnp.asarray(scenario.v_refs, dtype=jnp.float32),
+        ]
+    )
+    value = cost_functions[0](sample, context)
+    if not bool(jnp.isfinite(value)):
+        raise AssertionError(f"cost should be finite, got {value}")
+
+
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
+    test_signalized_intersection_cost_profile_contract()
     print("signalized intersection helper tests ok")

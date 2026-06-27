@@ -2,9 +2,11 @@
 
 import jax.numpy as jnp
 
-from config import DT_C
+from config import DT_C, VEH_L, VEH_W
 from decision_layout import BlockDecoder
 from scenarios import get_scenario
+from .common import dense_rollout_from_decisions
+from .constraint_dsl import Chance, Deterministic, build
 
 
 _SCENARIO = get_scenario("signalized_intersection")
@@ -102,3 +104,120 @@ def _cross_traj_for_xi(xi, n_steps):
     psi = jnp.full_like(y, jnp.pi / 2.0)
     zeros = jnp.zeros_like(y)
     return jnp.stack([x, y, v, psi, zeros, zeros], axis=1)
+
+
+def _decode_joint_sample(joint_sample_flat):
+    blocks = joint_sample_flat.reshape((_SOLVER_SPEC.n_blocks, _SOLVER_WIDTH))
+    return _DECODER.decode(blocks)
+
+
+def _shared_context(joint_sample_flat, context_arr):
+    current_states = context_arr[:_CTX_STATE_DIM].reshape(_SCENARIO.n_agents, _STATE_DIM)
+    decisions = _decode_joint_sample(joint_sample_flat)
+    dense_traj = dense_rollout_from_decisions(_SCENARIO, current_states, decisions)
+    return {
+        "decisions": decisions,
+        "dense_traj": dense_traj,
+        "current_states": current_states,
+        "context_arr": context_arr,
+    }
+
+
+def _ego_traj(ctx):
+    return ctx["dense_traj"][:, _EGO.state_index, :]
+
+
+def _axis_aligned_pair_penetration(a_traj, b_traj):
+    dx = jnp.abs(a_traj[:, 0] - b_traj[:, 0])
+    dy = jnp.abs(a_traj[:, 1] - b_traj[:, 1])
+    min_dx = VEH_L + _GEOM.safe_gap
+    min_dy = VEH_W + 0.5 * _GEOM.safe_gap
+    return jnp.maximum(min_dx - dx, min_dy - dy)
+
+
+def _cross_traffic_risk_violation(x, xi, ctx):
+    del x
+    ego = _ego_traj(ctx)
+    cross = _cross_traj_for_xi(xi, ego.shape[0])
+    return jnp.max(_axis_aligned_pair_penetration(ego, cross))
+
+
+def _ego_road_boundary_violation(x, ctx):
+    del x
+    ego_y = _ego_traj(ctx)[:, 1]
+    half_w = 0.5 * _GEOM.width
+    road_min = _SCENARIO.road.road_min_y
+    road_max = _SCENARIO.road.road_max_y
+    return jnp.max(jnp.maximum((road_min + half_w) - ego_y, ego_y - (road_max - half_w)))
+
+
+def _ego_red_light_violation(x, ctx):
+    del x
+    ego = _ego_traj(ctx)
+    t = _time_grid(ego.shape[0])
+    red = t >= RED_START_S
+    before_stop = ego[:, 0] <= STOP_LINE_X
+    cleared = ego[:, 0] >= INTERSECTION_EXIT_X
+    legal = jnp.logical_or(before_stop, cleared)
+    return jnp.max(jnp.where(jnp.logical_and(red, jnp.logical_not(legal)), 1.0, -1.0))
+
+
+def _no_blocking_intersection_violation(x, ctx):
+    del x
+    return _no_blocking_intersection_from_ego_traj(_ego_traj(ctx))
+
+
+def _dilemma_task_violation(x, ctx):
+    del x
+    ego = _ego_traj(ctx)
+    stopped_before = jnp.min(jnp.where(ego[:, 0] <= STOP_LINE_X, ego[:, 2], 1e3)) - 1.0
+    cleared = INTERSECTION_EXIT_X - jnp.max(ego[:, 0])
+    return jnp.minimum(stopped_before, cleared)
+
+
+def _ego_objective(x, ctx):
+    del x
+    ego = _ego_traj(ctx)
+    decisions = ctx["decisions"]
+    v_ref = ctx["context_arr"][_CTX_STATE_DIM + _EGO.reference_index]
+    stop_basin = (ego[-1, 0] - (STOP_LINE_X - 2.0)) ** 2 + 4.0 * ego[-1, 2] ** 2
+    pass_basin = (ego[-1, 0] - (INTERSECTION_EXIT_X + 6.0)) ** 2
+    mild_task = 0.05 * jnp.minimum(stop_basin, pass_basin)
+    speed = 0.2 * jnp.sum((ego[:, 2] - v_ref) ** 2 * DT_C)
+    lane = 4.0 * jnp.sum(ego[:, 1] ** 2 * DT_C)
+    heading = 3.0 * jnp.sum(ego[:, 3] ** 2 * DT_C)
+    ctrl = 0.2 * (
+        jnp.sum(ego[:, 4] ** 2)
+        + jnp.sum(ego[:, 5] ** 2)
+        + jnp.sum(jnp.diff(decisions["ego_acc"]) ** 2)
+        + jnp.sum(jnp.diff(decisions["ego_steer"]) ** 2)
+    )
+    return mild_task + speed + lane + heading + ctrl
+
+
+_ego_base_cost = build(
+    _ego_objective,
+    [
+        Deterministic(g_fn=_ego_red_light_violation, mode="hard", priority=1),
+        Deterministic(g_fn=_ego_road_boundary_violation, mode="hard", priority=1),
+        Deterministic(g_fn=_no_blocking_intersection_violation, mode="hard", priority=1),
+        Chance(
+            g_fn=_cross_traffic_risk_violation,
+            noise_fn=_cross_traffic_noise,
+            alpha=0.1,
+            n_samples=DEV_N_SAMPLES,
+            mode="tunable",
+            priority=2,
+            delta_soft=2.0,
+            beta=5.0,
+        ),
+        Deterministic(g_fn=_dilemma_task_violation, mode="tunable", priority=3),
+    ],
+    k_inner=0.1,
+    penalize_only_soft=True,
+    jit_cost=False,
+)
+
+
+def ego_cost(joint_sample_flat, context_arr):
+    return _ego_base_cost(joint_sample_flat, _shared_context(joint_sample_flat, context_arr))

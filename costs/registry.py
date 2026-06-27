@@ -8,6 +8,7 @@ from . import (
     borrow_overtake_matched,
     highway_merge,
     highway_merge_baseline,
+    signalized_intersection,
 )
 
 CostFunctions = Tuple[Callable, ...]
@@ -44,6 +45,9 @@ COST_PROFILES: Dict[str, CostFunctions] = {
         highway_merge_baseline.ego_cost,
         highway_merge_baseline.front_cost,
         highway_merge_baseline.rear_cost,
+    ),
+    "signalized_intersection": (
+        signalized_intersection.ego_cost,
     ),
 }
 
