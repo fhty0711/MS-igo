@@ -9,6 +9,9 @@ from . import (
     highway_merge,
     highway_merge_baseline,
     signalized_intersection,
+    signalized_intersection_no_chance,
+    signalized_intersection_single_mode,
+    signalized_intersection_soft_dilemma,
 )
 
 CostFunctions = Tuple[Callable, ...]
@@ -48,6 +51,15 @@ COST_PROFILES: Dict[str, CostFunctions] = {
     ),
     "signalized_intersection": (
         signalized_intersection.ego_cost,
+    ),
+    "signalized_intersection_no_chance": (
+        signalized_intersection_no_chance.ego_cost,
+    ),
+    "signalized_intersection_single_mode": (
+        signalized_intersection_single_mode.ego_cost,
+    ),
+    "signalized_intersection_soft_dilemma": (
+        signalized_intersection_soft_dilemma.ego_cost,
     ),
 }
 

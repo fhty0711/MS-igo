@@ -128,6 +128,35 @@ def test_signalized_intersection_cost_profile_contract():
         raise AssertionError(f"cost should be finite, got {value}")
 
 
+def test_signalized_intersection_ablation_profiles_are_registered_and_finite():
+    import jax.numpy as jnp
+    from costs import get_cost_functions
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection")
+    width = max(scenario.solver_spec.block_dims)
+    sample = jnp.zeros((scenario.solver_spec.n_blocks * width,), dtype=jnp.float32)
+    context = jnp.concatenate(
+        [
+            jnp.asarray(scenario.initial_states.reshape(-1), dtype=jnp.float32),
+            jnp.asarray(scenario.v_refs, dtype=jnp.float32),
+            jnp.asarray(scenario.context_values, dtype=jnp.float32),
+        ]
+    )
+    profiles = (
+        "signalized_intersection_no_chance",
+        "signalized_intersection_single_mode",
+        "signalized_intersection_soft_dilemma",
+    )
+    for profile in profiles:
+        cost_functions = get_cost_functions(profile)
+        if len(cost_functions) != scenario.n_agents:
+            raise AssertionError((profile, len(cost_functions)))
+        value = cost_functions[0](sample, context)
+        if not bool(jnp.isfinite(value)):
+            raise AssertionError(f"{profile} cost should be finite, got {value}")
+
+
 def test_signalized_intersection_metrics_classify_stop_pass_and_blocking():
     import numpy as np
     from costs import signalized_intersection as cost
@@ -202,6 +231,7 @@ if __name__ == "__main__":
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
+    test_signalized_intersection_ablation_profiles_are_registered_and_finite()
     test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
     test_signalized_intersection_visual_metrics_have_expected_keys()
     test_signalized_intersection_render_smoke()
