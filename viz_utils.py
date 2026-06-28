@@ -84,167 +84,6 @@ def _draw_road(ax, x_min, x_max, road=None):
         sp.set_visible(False)
 
 
-def _draw_signalized_intersection(ax, scenario, x_min, x_max):
-    """Draw intersection-specific geometry over the generic ego approach road."""
-    from costs import signalized_intersection as si
-    from scenarios import signalized_intersection as sig
-
-    road_min = scenario.road.road_min_y
-    road_max = scenario.road.road_max_y
-    cross_min = -22.0
-    cross_max = 22.0
-    cross_road_min = min(sig.CROSS_ROAD_LANE_CENTERS) - 0.5 * scenario.road.lane_width
-    cross_road_max = max(sig.CROSS_ROAD_LANE_CENTERS) + 0.5 * scenario.road.lane_width
-    ax.set_ylim(cross_min, cross_max)
-    ax.add_patch(
-        mpatches.Rectangle(
-            (cross_road_min, cross_min),
-            cross_road_max - cross_road_min,
-            cross_max - cross_min,
-            facecolor="#26384f",
-            edgecolor="#ffffff",
-            linewidth=1.0,
-            alpha=0.45,
-            zorder=1,
-        )
-    )
-    for idx, lane_x in enumerate(sig.CROSS_ROAD_LANE_CENTERS):
-        ax.add_patch(
-            mpatches.Rectangle(
-                (lane_x - 0.5 * scenario.road.lane_width, cross_min),
-                scenario.road.lane_width,
-                cross_max - cross_min,
-                facecolor="#314761" if idx % 2 == 0 else "#2b4059",
-                edgecolor="none",
-                alpha=0.18,
-                zorder=1,
-            )
-        )
-    for x_edge in (cross_road_min, cross_road_max):
-        ax.plot(
-            [x_edge, x_edge],
-            [cross_min, cross_max],
-            color="white",
-            lw=2.0,
-            zorder=2,
-        )
-    for x0, x1 in zip(sig.CROSS_ROAD_LANE_CENTERS[:-1], sig.CROSS_ROAD_LANE_CENTERS[1:]):
-        lane_mid = 0.5 * (x0 + x1)
-        y = cross_min
-        while y < cross_max:
-            ax.plot(
-                [lane_mid, lane_mid],
-                [y, y + 4.5],
-                color="white",
-                lw=1.2,
-                ls="--",
-                alpha=0.7,
-                zorder=2,
-            )
-            y += 9.0
-    ax.add_patch(
-        mpatches.Rectangle(
-            (si.INTERSECTION_ENTRY_X, road_min),
-            si.INTERSECTION_EXIT_X - si.INTERSECTION_ENTRY_X,
-            road_max - road_min,
-            facecolor="#334b68",
-            edgecolor="#ffffff",
-            linewidth=1.0,
-            alpha=0.38,
-            zorder=3,
-        )
-    )
-    ax.plot(
-        [si.STOP_LINE_X, si.STOP_LINE_X],
-        [road_min - 0.5, road_max + 0.5],
-        color="#ffdf6e",
-        lw=2.4,
-        zorder=4,
-    )
-    ax.plot(
-        [si.CROSS_LANE_X, si.CROSS_LANE_X],
-        [cross_min, cross_max],
-        color="#d9e6f2",
-        lw=1.0,
-        ls="--",
-        alpha=0.65,
-        zorder=1,
-    )
-    lamp_x = min(max(si.STOP_LINE_X + 2.5, x_min + 4.0), x_max - 4.0)
-    lamp_y = road_max + 0.45
-    ax.scatter([lamp_x], [lamp_y], s=80, color="#ffd166", edgecolors="white", zorder=9)
-    ax.text(
-        lamp_x + 1.0,
-        lamp_y,
-        "yellow -> red",
-        color="white",
-        fontsize=7,
-        va="center",
-        zorder=9,
-    )
-
-
-def _draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
-    """Draw exogenous cross-traffic behavior samples for intersection scenarios."""
-    from costs import signalized_intersection as si
-    import jax.numpy as jnp
-
-    samples = np.asarray(si._cross_traffic_noise(None, (30,)))
-    n_steps = scenario.control_horizon * SUB_STEPS
-    critical_xi = None
-    if ego_traj is not None:
-        metrics = si.estimate_visual_metrics(ego_traj, n_samples=30)
-        critical_xi = np.asarray(metrics["critical_sample"], dtype=float)
-    for xi in samples:
-        mode = int(xi[si.XI_MODE])
-        color = {
-            si.MODE_OBEY: "#4cc9f0",
-            si.MODE_YELLOW_RUSH: "#ffd166",
-            si.MODE_RED_RUN: "#ef476f",
-        }.get(mode, "#ffffff")
-        tr = np.asarray(si._cross_traj_for_xi(jnp.asarray(xi), n_steps))
-        is_critical = critical_xi is not None and np.allclose(xi, critical_xi)
-        ax.plot(
-            tr[:, 0],
-            tr[:, 1],
-            color=color,
-            lw=2.0 if is_critical else 0.8,
-            alpha=0.65 if is_critical else 0.16,
-            zorder=5 if is_critical else 2,
-        )
-
-
-def _draw_intersection_metrics(ax, ego_traj):
-    """Draw display-only signalized-intersection metrics."""
-    from costs import signalized_intersection as si
-
-    metrics = si.estimate_visual_metrics(ego_traj, n_samples=40)
-    text = (
-        f"mode: {metrics['mode']}\n"
-        f"min clearance: {metrics['min_clearance']:.1f} m\n"
-        f"risk q90: {metrics['risk_quantile']:.1f}\n"
-        f"red legal: {metrics['red_legal']}\n"
-        f"no blocking: {metrics['no_blocking']}"
-    )
-    ax.text(
-        0.012,
-        0.965,
-        text,
-        transform=ax.transAxes,
-        color="white",
-        fontsize=7.5,
-        va="top",
-        ha="left",
-        bbox={
-            "boxstyle": "round,pad=0.35",
-            "facecolor": "#0a1120",
-            "edgecolor": "#445566",
-            "alpha": 0.82,
-        },
-        zorder=12,
-    )
-
-
 def _smooth_xy(points, samples_per_segment=8):
     """Catmull-Rom smoothing for display only; endpoints are preserved."""
     pts = np.asarray(points, dtype=float)
@@ -299,7 +138,9 @@ def render_agents_panel(
         x_max = x_min + x_win
     _draw_road(ax, x_min, x_max, scenario.road)
     if scenario.name.startswith("signalized_intersection"):
-        _draw_signalized_intersection(ax, scenario, x_min, x_max)
+        import viz_signalized
+
+        viz_signalized.draw_signalized_scene(ax, scenario, x_min, x_max)
 
     micro_per_macro = SUB_STEPS
     color_by_agent = {
@@ -346,10 +187,14 @@ def render_agents_panel(
             ax.plot(best_xy[:, 0], best_xy[:, 1], color="#9ff3bd",
                     lw=2.2, alpha=0.95, zorder=4)
             if scenario.name.startswith("signalized_intersection"):
-                _draw_cross_traffic_cloud(ax, scenario, ego_traj=best)
-                _draw_intersection_metrics(ax, best)
+                import viz_signalized
+
+                viz_signalized.draw_cross_traffic_cloud(ax, scenario, ego_traj=best)
+                viz_signalized.draw_intersection_metrics(ax, best)
     elif scenario.name.startswith("signalized_intersection"):
-        _draw_cross_traffic_cloud(ax, scenario)
+        import viz_signalized
+
+        viz_signalized.draw_cross_traffic_cloud(ax, scenario)
 
     for idx, agent in enumerate(scenario.agents):
         state = states_by_agent[agent.name]

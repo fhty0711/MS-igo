@@ -416,6 +416,31 @@ def test_signalized_intersection_report_rows_render():
         raise AssertionError("report should include outcome metrics figure")
 
 
+def test_signalized_semantic_layers_contract():
+    from scenarios import get_scenario
+    import viz_signalized
+
+    scenario = get_scenario("signalized_intersection")
+    layers = viz_signalized.semantic_layer_summary(scenario)
+    expected_exact = {
+        "horizontal_lanes": 4,
+        "vertical_lanes": 4,
+        "crosswalks": 2,
+    }
+    for key, expected in expected_exact.items():
+        if layers.get(key) != expected:
+            raise AssertionError(f"{key}: expected {expected}, got {layers}")
+    minimums = {
+        "stop_lines": 1,
+        "direction_arrows": 4,
+        "risk_cloud_samples": 30,
+        "traffic_signals": 1,
+    }
+    for key, minimum in minimums.items():
+        if layers.get(key, 0) < minimum:
+            raise AssertionError(f"{key}: expected at least {minimum}, got {layers}")
+
+
 def test_signalized_intersection_render_smoke():
     import matplotlib
     matplotlib.use("Agg")
@@ -439,6 +464,16 @@ def test_signalized_intersection_render_smoke():
     )
     if len(ax.patches) < 6:
         raise AssertionError("expected vehicle plus multi-lane intersection patches")
+    gids = {patch.get_gid() for patch in ax.patches if patch.get_gid()}
+    expected_gids = {
+        "lane_polygon",
+        "crosswalk",
+        "conflict_box",
+        "traffic_signal",
+    }
+    missing = expected_gids - gids
+    if missing:
+        raise AssertionError(f"missing semantic map patch labels: {missing}")
     plt.close(fig)
 
 
@@ -459,5 +494,6 @@ if __name__ == "__main__":
     test_signalized_intersection_visual_metrics_have_expected_keys()
     test_signalized_intersection_comparison_runner_contract()
     test_signalized_intersection_report_rows_render()
+    test_signalized_semantic_layers_contract()
     test_signalized_intersection_render_smoke()
     print("signalized intersection helper tests ok")
