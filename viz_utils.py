@@ -87,22 +87,71 @@ def _draw_road(ax, x_min, x_max, road=None):
 def _draw_signalized_intersection(ax, scenario, x_min, x_max):
     """Draw intersection-specific geometry over the generic ego approach road."""
     from costs import signalized_intersection as si
+    from scenarios import signalized_intersection as sig
 
     road_min = scenario.road.road_min_y
     road_max = scenario.road.road_max_y
-    cross_min = -18.0
-    cross_max = 18.0
+    cross_min = -22.0
+    cross_max = 22.0
+    cross_road_min = min(sig.CROSS_ROAD_LANE_CENTERS) - 0.5 * scenario.road.lane_width
+    cross_road_max = max(sig.CROSS_ROAD_LANE_CENTERS) + 0.5 * scenario.road.lane_width
     ax.set_ylim(cross_min, cross_max)
     ax.add_patch(
         mpatches.Rectangle(
-            (si.INTERSECTION_ENTRY_X, cross_min),
-            si.INTERSECTION_EXIT_X - si.INTERSECTION_ENTRY_X,
+            (cross_road_min, cross_min),
+            cross_road_max - cross_road_min,
             cross_max - cross_min,
             facecolor="#26384f",
             edgecolor="#ffffff",
             linewidth=1.0,
             alpha=0.45,
             zorder=1,
+        )
+    )
+    for idx, lane_x in enumerate(sig.CROSS_ROAD_LANE_CENTERS):
+        ax.add_patch(
+            mpatches.Rectangle(
+                (lane_x - 0.5 * scenario.road.lane_width, cross_min),
+                scenario.road.lane_width,
+                cross_max - cross_min,
+                facecolor="#314761" if idx % 2 == 0 else "#2b4059",
+                edgecolor="none",
+                alpha=0.18,
+                zorder=1,
+            )
+        )
+    for x_edge in (cross_road_min, cross_road_max):
+        ax.plot(
+            [x_edge, x_edge],
+            [cross_min, cross_max],
+            color="white",
+            lw=2.0,
+            zorder=2,
+        )
+    for x0, x1 in zip(sig.CROSS_ROAD_LANE_CENTERS[:-1], sig.CROSS_ROAD_LANE_CENTERS[1:]):
+        lane_mid = 0.5 * (x0 + x1)
+        y = cross_min
+        while y < cross_max:
+            ax.plot(
+                [lane_mid, lane_mid],
+                [y, y + 4.5],
+                color="white",
+                lw=1.2,
+                ls="--",
+                alpha=0.7,
+                zorder=2,
+            )
+            y += 9.0
+    ax.add_patch(
+        mpatches.Rectangle(
+            (si.INTERSECTION_ENTRY_X, road_min),
+            si.INTERSECTION_EXIT_X - si.INTERSECTION_ENTRY_X,
+            road_max - road_min,
+            facecolor="#334b68",
+            edgecolor="#ffffff",
+            linewidth=1.0,
+            alpha=0.38,
+            zorder=3,
         )
     )
     ax.plot(

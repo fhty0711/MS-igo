@@ -23,6 +23,37 @@ def test_signalized_intersection_scenario_contract():
         raise AssertionError(scenario.cost_profile)
 
 
+def test_signalized_intersection_uses_double_lane_intersection_geometry():
+    from scenarios import get_scenario
+    from scenarios import signalized_intersection as geom
+
+    scenario = get_scenario("signalized_intersection")
+    if scenario.road.lane_centers != geom.EGO_ROAD_LANE_CENTERS:
+        raise AssertionError(
+            f"horizontal road lanes should match geometry constants: "
+            f"{scenario.road.lane_centers} != {geom.EGO_ROAD_LANE_CENTERS}"
+        )
+    if len(scenario.road.lane_centers) != 4:
+        raise AssertionError(f"expected two lanes per direction, got {scenario.road}")
+    if geom.EGO_LANE_Y not in scenario.road.lane_centers:
+        raise AssertionError(f"ego lane {geom.EGO_LANE_Y} not in {scenario.road}")
+    if geom.CROSS_LANE_X not in geom.CROSS_ROAD_LANE_CENTERS:
+        raise AssertionError(
+            f"cross lane {geom.CROSS_LANE_X} not in {geom.CROSS_ROAD_LANE_CENTERS}"
+        )
+    if len(geom.CROSS_ROAD_LANE_CENTERS) != 4:
+        raise AssertionError(
+            f"expected vertical road to have two lanes per direction, got "
+            f"{geom.CROSS_ROAD_LANE_CENTERS}"
+        )
+    if not geom.STOP_LINE_X < geom.INTERSECTION_ENTRY_X < geom.CROSS_LANE_X:
+        raise AssertionError(
+            "stop line should precede conflict box and selected cross lane"
+        )
+    if not geom.CROSS_LANE_X < geom.INTERSECTION_EXIT_X:
+        raise AssertionError("selected cross lane should lie inside conflict box")
+
+
 def test_signalized_intersection_variants_are_registered():
     from scenarios import get_scenario
 
@@ -87,6 +118,17 @@ def test_cross_traffic_noise_is_multimodal_and_small_by_default():
         raise AssertionError(f"expected modes {expected}, got {modes}")
 
 
+def test_cross_traffic_rollout_uses_selected_vertical_lane():
+    import jax.numpy as jnp
+    from costs import signalized_intersection as cost
+    from scenarios import signalized_intersection as geom
+
+    xi = jnp.array([float(cost.MODE_YELLOW_RUSH), 0.0, 1.0, 0.0], dtype=jnp.float32)
+    traj = cost._cross_traj_for_xi(xi, 8)
+    if not bool(jnp.allclose(traj[:, 0], geom.CROSS_LANE_X)):
+        raise AssertionError(f"cross traffic should stay in selected vertical lane: {traj[:, 0]}")
+
+
 def test_no_blocking_intersection_violation():
     import jax.numpy as jnp
     from costs import signalized_intersection as cost
@@ -126,6 +168,87 @@ def test_signalized_intersection_cost_profile_contract():
     value = cost_functions[0](sample, context)
     if not bool(jnp.isfinite(value)):
         raise AssertionError(f"cost should be finite, got {value}")
+
+
+def test_signalized_intersection_cost_hierarchy_uses_constran_presets():
+    from costs import signalized_intersection as cost
+
+    specs = cost.EGO_CONSTRAINT_SPECS
+    if len(specs) != 5:
+        raise AssertionError(f"expected five ego constraint layers, got {len(specs)}")
+
+    by_name = {name: spec for name, spec in specs}
+    expected = {
+        "red_light",
+        "road_boundary",
+        "no_blocking_intersection",
+        "cross_traffic_chance",
+        "dilemma_task",
+    }
+    if set(by_name) != expected:
+        raise AssertionError(f"unexpected constraint names {set(by_name)}")
+
+    for name in ("red_light", "road_boundary", "no_blocking_intersection"):
+        spec = by_name[name]
+        if spec.mode != "tunable" or spec.tune_preset != "__hard__":
+            raise AssertionError(f"{name} should be hard-normalized, got {spec}")
+        if spec.priority != 1 or spec.transform != "sharp":
+            raise AssertionError(f"{name} should be priority-1 sharp hard layer, got {spec}")
+
+    risk = by_name["cross_traffic_chance"]
+    if risk.priority != 2 or risk.mode != "tunable":
+        raise AssertionError(risk)
+    if risk.tune_preset != "firm" or risk.transform != "standard":
+        raise AssertionError(
+            "cross-traffic chance should use Constran firm/standard presets, "
+            f"got tune={risk.tune_preset}, transform={risk.transform}"
+        )
+    if risk.n_samples != cost.DEV_N_SAMPLES or risk.aggregate != "":
+        raise AssertionError(risk)
+
+    dilemma = by_name["dilemma_task"]
+    if dilemma.priority != 3 or dilemma.mode != "tunable":
+        raise AssertionError(dilemma)
+    if dilemma.tune_preset != "standard" or dilemma.transform != "standard":
+        raise AssertionError(dilemma)
+
+
+def test_signalized_intersection_objective_tracks_ego_lane_center():
+    import jax.numpy as jnp
+    from costs import signalized_intersection as cost
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection")
+    n_steps = 6
+    base = jnp.zeros((n_steps, scenario.n_agents, scenario.state_dim), dtype=jnp.float32)
+    x = jnp.linspace(0.0, 20.0, n_steps)
+    lane_traj = base.at[:, 0, 0].set(x).at[:, 0, 1].set(scenario.target_y).at[:, 0, 2].set(10.0)
+    center_traj = base.at[:, 0, 0].set(x).at[:, 0, 1].set(0.0).at[:, 0, 2].set(10.0)
+    decisions = {
+        "ego_acc": jnp.zeros((scenario.control_horizon,), dtype=jnp.float32),
+        "ego_steer": jnp.zeros((scenario.control_horizon,), dtype=jnp.float32),
+    }
+    context_arr = jnp.concatenate(
+        [
+            jnp.asarray(scenario.initial_states.reshape(-1), dtype=jnp.float32),
+            jnp.asarray(scenario.v_refs, dtype=jnp.float32),
+            jnp.asarray(scenario.context_values, dtype=jnp.float32),
+        ]
+    )
+
+    lane_value = cost._ego_objective(
+        None,
+        {"dense_traj": lane_traj, "decisions": decisions, "context_arr": context_arr},
+    )
+    center_value = cost._ego_objective(
+        None,
+        {"dense_traj": center_traj, "decisions": decisions, "context_arr": context_arr},
+    )
+    if not float(lane_value) < float(center_value):
+        raise AssertionError(
+            f"ego objective should prefer target lane center {scenario.target_y}: "
+            f"lane={lane_value}, center={center_value}"
+        )
 
 
 def test_signalized_intersection_ablation_profiles_are_registered_and_finite():
@@ -314,19 +437,23 @@ def test_signalized_intersection_render_smoke():
         x_win=44.0,
         title="smoke",
     )
-    if len(ax.patches) == 0:
-        raise AssertionError("expected vehicle/intersection patches")
+    if len(ax.patches) < 6:
+        raise AssertionError("expected vehicle plus multi-lane intersection patches")
     plt.close(fig)
 
 
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
+    test_signalized_intersection_uses_double_lane_intersection_geometry()
     test_signalized_intersection_variants_are_registered()
     test_signalized_intersection_variant_timing_order()
     test_signalized_intersection_variant_timing_reaches_cost_context()
     test_cross_traffic_noise_is_multimodal_and_small_by_default()
+    test_cross_traffic_rollout_uses_selected_vertical_lane()
     test_no_blocking_intersection_violation()
     test_signalized_intersection_cost_profile_contract()
+    test_signalized_intersection_cost_hierarchy_uses_constran_presets()
+    test_signalized_intersection_objective_tracks_ego_lane_center()
     test_signalized_intersection_ablation_profiles_are_registered_and_finite()
     test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
     test_signalized_intersection_visual_metrics_have_expected_keys()

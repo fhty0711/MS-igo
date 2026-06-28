@@ -1,27 +1,27 @@
 """Signalized-intersection ablation without probabilistic cross-traffic risk."""
 
-from .constraint_dsl import Deterministic, build
+from .constraint_dsl import build
 from .signalized_intersection import (
-    _dilemma_task_violation,
+    _constraint_specs_by_name,
     _ego_objective,
-    _ego_red_light_violation,
-    _ego_road_boundary_violation,
-    _no_blocking_intersection_violation,
     _shared_context,
 )
 
 
 _ego_base_cost = build(
     _ego_objective,
-    [
-        Deterministic(g_fn=_ego_red_light_violation, mode="hard", priority=1),
-        Deterministic(g_fn=_ego_road_boundary_violation, mode="hard", priority=1),
-        Deterministic(g_fn=_no_blocking_intersection_violation, mode="hard", priority=1),
-        Deterministic(g_fn=_dilemma_task_violation, mode="tunable", priority=3),
-    ],
+    _constraint_specs_by_name(
+        (
+            "red_light",
+            "road_boundary",
+            "no_blocking_intersection",
+            "dilemma_task",
+        )
+    ),
     k_inner=0.1,
     penalize_only_soft=True,
     jit_cost=False,
+    obj_transform="standard",
 )
 
 

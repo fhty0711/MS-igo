@@ -18,12 +18,25 @@ from .spec import (
 )
 
 
-EGO_LANE_Y = 0.0
-CROSS_LANE_X = 42.0
-STOP_LINE_X = 34.0
-INTERSECTION_ENTRY_X = 36.0
-INTERSECTION_EXIT_X = 50.0
-CROSS_ROAD_HALF_WIDTH = 4.0
+EGO_ROAD_LANE_CENTERS = (
+    -1.5 * LANE_W,
+    -0.5 * LANE_W,
+    0.5 * LANE_W,
+    1.5 * LANE_W,
+)
+EGO_LANE_Y = -0.5 * LANE_W
+INTERSECTION_CENTER_X = 42.0
+CROSS_ROAD_LANE_CENTERS = (
+    INTERSECTION_CENTER_X - 1.5 * LANE_W,
+    INTERSECTION_CENTER_X - 0.5 * LANE_W,
+    INTERSECTION_CENTER_X + 0.5 * LANE_W,
+    INTERSECTION_CENTER_X + 1.5 * LANE_W,
+)
+CROSS_LANE_X = INTERSECTION_CENTER_X - 0.5 * LANE_W
+INTERSECTION_ENTRY_X = INTERSECTION_CENTER_X - 2.0 * LANE_W
+INTERSECTION_EXIT_X = INTERSECTION_CENTER_X + 2.0 * LANE_W
+STOP_LINE_X = INTERSECTION_ENTRY_X - 2.0
+CROSS_ROAD_HALF_WIDTH = 2.0 * LANE_W
 
 EGO_X0 = 0.0
 EGO_Y0 = EGO_LANE_Y
@@ -83,7 +96,7 @@ def _make_scenario(
         control_horizon=CONTROL_HORIZON,
         n_mpc_steps=n_mpc_steps,
         snap_frames=snap_frames,
-        road=RoadSpec(LANE_W, (EGO_LANE_Y,)),
+        road=RoadSpec(LANE_W, EGO_ROAD_LANE_CENTERS),
         vehicle_geometry=VehicleGeometrySpec(VEH_L, VEH_W, SAFE_GAP),
         context_values=(yellow_start_s, red_start_s),
         notes=(

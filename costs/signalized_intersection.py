@@ -6,6 +6,13 @@ import numpy as np
 from config import DT_C, VEH_L, VEH_W
 from decision_layout import BlockDecoder
 from scenarios import get_scenario
+from scenarios.signalized_intersection import (
+    CROSS_LANE_X,
+    CROSS_ROAD_HALF_WIDTH,
+    INTERSECTION_ENTRY_X,
+    INTERSECTION_EXIT_X,
+    STOP_LINE_X,
+)
 from .common import dense_rollout_from_decisions
 from .constraint_dsl import Chance, Deterministic, build
 
@@ -21,13 +28,8 @@ _CTX_EXTRA_OFFSET = _CTX_STATE_DIM + _CTX_REF_DIM
 _EGO = _SCENARIO.agents[0]
 _GEOM = _SCENARIO.vehicle_geometry
 
-STOP_LINE_X = 34.0
-INTERSECTION_ENTRY_X = 36.0
-INTERSECTION_EXIT_X = 50.0
-CROSS_LANE_X = 42.0
 CROSS_START_Y = -18.0
 CROSS_CLEAR_Y = 18.0
-CROSS_ROAD_HALF_WIDTH = 4.0
 YELLOW_START_S = 0.6
 YELLOW_DURATION_S = 2.4
 RED_START_S = YELLOW_START_S + YELLOW_DURATION_S
@@ -286,7 +288,7 @@ def _ego_objective(x, ctx):
     pass_basin = (ego[-1, 0] - (INTERSECTION_EXIT_X + 6.0)) ** 2
     mild_task = 0.05 * jnp.minimum(stop_basin, pass_basin)
     speed = 0.2 * jnp.sum((ego[:, 2] - v_ref) ** 2 * DT_C)
-    lane = 4.0 * jnp.sum(ego[:, 1] ** 2 * DT_C)
+    lane = 4.0 * jnp.sum((ego[:, 1] - _SCENARIO.target_y) ** 2 * DT_C)
     heading = 3.0 * jnp.sum(ego[:, 3] ** 2 * DT_C)
     ctrl = 0.2 * (
         jnp.sum(ego[:, 4] ** 2)
@@ -297,12 +299,36 @@ def _ego_objective(x, ctx):
     return mild_task + speed + lane + heading + ctrl
 
 
-_ego_base_cost = build(
-    _ego_objective,
-    [
-        Deterministic(g_fn=_ego_red_light_violation, mode="hard", priority=1),
-        Deterministic(g_fn=_ego_road_boundary_violation, mode="hard", priority=1),
-        Deterministic(g_fn=_no_blocking_intersection_violation, mode="hard", priority=1),
+EGO_CONSTRAINT_SPECS = (
+    (
+        "red_light",
+        Deterministic(
+            g_fn=_ego_red_light_violation,
+            mode="hard",
+            priority=1,
+            transform="sharp",
+        ),
+    ),
+    (
+        "road_boundary",
+        Deterministic(
+            g_fn=_ego_road_boundary_violation,
+            mode="hard",
+            priority=1,
+            transform="sharp",
+        ),
+    ),
+    (
+        "no_blocking_intersection",
+        Deterministic(
+            g_fn=_no_blocking_intersection_violation,
+            mode="hard",
+            priority=1,
+            transform="sharp",
+        ),
+    ),
+    (
+        "cross_traffic_chance",
         Chance(
             g_fn=_cross_traffic_risk_violation,
             noise_fn=_cross_traffic_noise,
@@ -310,14 +336,35 @@ _ego_base_cost = build(
             n_samples=DEV_N_SAMPLES,
             mode="tunable",
             priority=2,
-            delta_soft=2.0,
-            beta=5.0,
+            tune_preset="firm",
+            transform="standard",
         ),
-        Deterministic(g_fn=_dilemma_task_violation, mode="tunable", priority=3),
-    ],
+    ),
+    (
+        "dilemma_task",
+        Deterministic(
+            g_fn=_dilemma_task_violation,
+            mode="tunable",
+            priority=3,
+            tune_preset="standard",
+            transform="standard",
+        ),
+    ),
+)
+
+
+def _constraint_specs_by_name(names):
+    lookup = dict(EGO_CONSTRAINT_SPECS)
+    return [lookup[name] for name in names]
+
+
+_ego_base_cost = build(
+    _ego_objective,
+    [spec for _name, spec in EGO_CONSTRAINT_SPECS],
     k_inner=0.1,
     penalize_only_soft=True,
     jit_cost=False,
+    obj_transform="standard",
 )
 
 
