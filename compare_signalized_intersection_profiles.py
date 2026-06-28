@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 
 import jax
 from jax import random
@@ -22,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from backends import get_backend
-from config import RNG_SEED
+from config import DT, RNG_SEED
 from costs import signalized_intersection as si
 from scenarios import get_scenario
 from viz_utils import render_agents_panel
@@ -31,6 +33,7 @@ from viz_utils import render_agents_panel
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(ROOT, "figures", "signalized_intersection_comparison")
 CACHE_DIR = os.path.join(OUT_DIR, "cache")
+MANIFEST_PATH = os.path.join(OUT_DIR, "manifest.json")
 
 DEFAULT_SCENARIOS = (
     "signalized_intersection_easy_pass",
@@ -45,6 +48,9 @@ DEFAULT_COSTS = (
 )
 OUTCOME_METRICS = (
     "mode_outcome",
+    "task_success",
+    "safety_success",
+    "scheme_a_success",
     "red_legal",
     "no_blocking",
     "cleared_intersection",
@@ -110,22 +116,95 @@ def _run_closed_loop(scenario_name: str, cost_profile: str) -> RunRecord:
 def _compute_metrics(scenario, histories: dict[str, np.ndarray]) -> dict[str, float | str | bool]:
     """Compute signalized-intersection summary metrics from ego history."""
     ego = np.asarray(histories["ego"], dtype=float)
-    visual = si.estimate_visual_metrics(ego, n_samples=80)
+    red_start_s = float(scenario.context_values[1])
+    visual = si.estimate_visual_metrics(
+        ego,
+        n_samples=80,
+        red_start_s=red_start_s,
+        dt=DT,
+    )
     final = ego[-1]
+    red_legal = si.np_red_legal_for_history(
+        ego,
+        red_start_s=red_start_s,
+        dt=DT,
+    )
     stopped_before = bool(np.any((ego[:, 0] <= si.STOP_LINE_X) & (ego[:, 2] <= 1.0)))
     cleared = bool(np.max(ego[:, 0]) >= si.INTERSECTION_EXIT_X)
-    return {
+    metrics = {
         "mode": str(visual["mode"]),
         "final_x": float(final[0]),
         "final_y": float(final[1]),
         "final_v": float(final[2]),
         "min_clearance": float(visual["min_clearance"]),
         "risk_quantile": float(visual["risk_quantile"]),
-        "red_legal": bool(visual["red_legal"]),
+        "red_legal": red_legal,
         "no_blocking": bool(visual["no_blocking"]),
         "cleared_intersection": cleared,
         "stopped_before_line": stopped_before,
     }
+    metrics.update(_derive_task_metrics(str(scenario.name), metrics))
+    return metrics
+
+
+def _derive_task_metrics(
+    scenario_name: str,
+    metrics: dict[str, float | str | bool],
+) -> dict[str, str | bool]:
+    """Add paper-level task labels from raw signalized-intersection metrics."""
+    scenario_intent = _scenario_intent(scenario_name)
+    red_legal = bool(metrics.get("red_legal", False))
+    no_blocking = bool(metrics.get("no_blocking", False))
+    cleared = bool(metrics.get("cleared_intersection", False))
+    stopped = bool(metrics.get("stopped_before_line", False))
+    min_clearance = float(metrics.get("min_clearance", float("-inf")))
+
+    if scenario_intent == "must_stop":
+        task_success = red_legal and no_blocking and stopped and not cleared
+    elif scenario_intent == "dilemma":
+        task_success = red_legal and no_blocking and (cleared or (stopped and not cleared))
+    else:
+        task_success = red_legal and no_blocking and cleared
+
+    safety_success = red_legal and no_blocking and min_clearance >= 0.0
+    if not red_legal:
+        failure_reason = "red_illegal"
+    elif not no_blocking:
+        failure_reason = "blocked_intersection"
+    elif min_clearance < 0.0:
+        failure_reason = "cross_traffic_conflict"
+    elif not task_success:
+        failure_reason = "task_unresolved"
+    else:
+        failure_reason = "none"
+
+    if failure_reason != "none":
+        paper_claim = "unsafe_or_blocked"
+    elif task_success and cleared:
+        paper_claim = "safe_pass"
+    elif task_success and stopped and not cleared:
+        paper_claim = "safe_stop"
+    else:
+        paper_claim = "undecided"
+
+    return {
+        "scenario_intent": scenario_intent,
+        "task_success": task_success,
+        "safety_success": safety_success,
+        "scheme_a_success": task_success and safety_success and paper_claim in {"safe_pass", "safe_stop"},
+        "paper_claim": paper_claim,
+        "failure_reason": failure_reason,
+    }
+
+
+def _scenario_intent(scenario_name: str) -> str:
+    if scenario_name.endswith("easy_pass"):
+        return "easy_pass"
+    if scenario_name.endswith("must_stop"):
+        return "must_stop"
+    if scenario_name.endswith("critical") or scenario_name == "signalized_intersection":
+        return "dilemma"
+    return "dilemma"
 
 
 def _draw_history_panel(ax, record: RunRecord, title: str):
@@ -143,6 +222,7 @@ def _draw_history_panel(ax, record: RunRecord, title: str):
         x_win=78.0,
         title=title,
         show_step=2,
+        elapsed_time_s=max(len(ego) - 1, 0) * DT,
     )
 
 
@@ -211,7 +291,9 @@ def _plot_outcome_overview(records: list[RunRecord], scenarios: tuple[str, ...],
     colors = {cost: palette[idx % len(palette)] for idx, cost in enumerate(costs)}
     mode_to_value = {"stop": 0.0, "undecided": 0.5, "pass": 1.0}
 
-    fig, axes = plt.subplots(3, 2, figsize=(12.5, 9.0), squeeze=False)
+    n_cols = 2
+    n_rows = int(np.ceil(len(OUTCOME_METRICS) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(12.5, 3.0 * n_rows), squeeze=False)
     fig.patch.set_facecolor("#0a1120")
     fig.subplots_adjust(left=0.07, right=0.98, top=0.90, bottom=0.08, wspace=0.22, hspace=0.42)
     fig.suptitle("Signalized Intersection Outcomes", color="white", fontsize=15)
@@ -241,7 +323,8 @@ def _plot_outcome_overview(records: list[RunRecord], scenarios: tuple[str, ...],
         for spine in ax.spines.values():
             spine.set_color("#40506b")
         ax.set_title(metric, color="white", fontsize=10)
-    axes.ravel()[-1].axis("off")
+    for ax in axes.ravel()[len(OUTCOME_METRICS) :]:
+        ax.axis("off")
     axes[0, 1].legend(facecolor="#0a1120", edgecolor="#40506b", labelcolor="white", fontsize=8)
     path = os.path.join(OUT_DIR, "overview_outcomes.png")
     fig.savefig(path, dpi=180, bbox_inches="tight", facecolor=fig.get_facecolor())
@@ -252,13 +335,59 @@ def _plot_outcome_overview(records: list[RunRecord], scenarios: tuple[str, ...],
 def _write_summary_csv(records: list[RunRecord]):
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, "summary.csv")
-    fieldnames = ["scenario", "cost_profile"] + list(_compute_metrics(records[0].scenario, records[0].histories).keys())
+    fieldnames = [
+        "scenario",
+        "cost_profile",
+        "mode",
+        "final_x",
+        "final_y",
+        "final_v",
+        "min_clearance",
+        "risk_quantile",
+        "red_legal",
+        "no_blocking",
+        "cleared_intersection",
+        "stopped_before_line",
+        "scenario_intent",
+        "task_success",
+        "safety_success",
+        "scheme_a_success",
+        "paper_claim",
+        "failure_reason",
+    ]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for record in records:
             writer.writerow(record.metrics)
     print(f"[save] {path}")
+
+
+def _write_manifest(records: list[RunRecord], scenarios: tuple[str, ...], costs: tuple[str, ...], force: bool):
+    manifest = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "scheme": "A",
+        "scope": "single optimizing ego with exogenous probabilistic cross traffic",
+        "scenarios": list(scenarios),
+        "cost_profiles": list(costs),
+        "n_records": len(records),
+        "force_rerun": bool(force),
+        "dt": DT,
+        "rng_seed": RNG_SEED,
+        "optimization_cross_traffic_samples": si.DEV_N_SAMPLES,
+        "evaluation_cross_traffic_samples": 80,
+        "jax_devices": [str(device) for device in jax.devices()],
+        "outputs": {
+            "summary_csv": os.path.join(OUT_DIR, "summary.csv"),
+            "trajectory_overview": os.path.join(OUT_DIR, "overview_trajectories.png"),
+            "metrics_overview": os.path.join(OUT_DIR, "overview_metrics.png"),
+            "outcome_overview": os.path.join(OUT_DIR, "overview_outcomes.png"),
+        },
+    }
+    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+    print(f"[save] {MANIFEST_PATH}")
 
 
 def _short_scenario_label(name: str) -> str:
@@ -305,6 +434,7 @@ def main():
     _plot_trajectory_overview(records, scenarios, costs)
     _plot_metrics_overview(records, scenarios, costs)
     _plot_outcome_overview(records, scenarios, costs)
+    _write_manifest(records, scenarios, costs, args.force)
     print("[done] signalized-intersection comparison complete")
 
 

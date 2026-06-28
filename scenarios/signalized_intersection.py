@@ -99,6 +99,11 @@ def _make_scenario(
         road=RoadSpec(LANE_W, EGO_ROAD_LANE_CENTERS),
         vehicle_geometry=VehicleGeometrySpec(VEH_L, VEH_W, SAFE_GAP),
         context_values=(yellow_start_s, red_start_s),
+        exec_mode="cost_select",
+        initial_component_means=(
+            (-2.5, -0.8, 0.0),
+            (0.0, 0.0, 0.0),
+        ),
         notes=(
             "cross_traffic_exogenous",
             f"stop_line_x={STOP_LINE_X}",
@@ -140,7 +145,7 @@ def make_critical_scenario() -> ScenarioSpec:
         ego_x0=0.0,
         ego_v0=14.0,
         yellow_start_s=0.6,
-        yellow_duration_s=2.4,
+        yellow_duration_s=2.7,
     )
 
 
@@ -151,5 +156,5 @@ def make_scenario() -> ScenarioSpec:
         ego_x0=0.0,
         ego_v0=14.0,
         yellow_start_s=0.6,
-        yellow_duration_s=2.4,
+        yellow_duration_s=2.7,
     )

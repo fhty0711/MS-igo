@@ -3,12 +3,11 @@
 import jax.numpy as jnp
 import numpy as np
 
-from config import DT_C, VEH_L, VEH_W
+from config import DT_C, MAX_ACC, VEH_L, VEH_W
 from decision_layout import BlockDecoder
 from scenarios import get_scenario
 from scenarios.signalized_intersection import (
     CROSS_LANE_X,
-    CROSS_ROAD_HALF_WIDTH,
     INTERSECTION_ENTRY_X,
     INTERSECTION_EXIT_X,
     STOP_LINE_X,
@@ -27,9 +26,9 @@ _CTX_REF_DIM = _SCENARIO.context_ref_dim
 _CTX_EXTRA_OFFSET = _CTX_STATE_DIM + _CTX_REF_DIM
 _EGO = _SCENARIO.agents[0]
 _GEOM = _SCENARIO.vehicle_geometry
+_CROSS_OBEY_STOP_BUFFER = 0.5 * _GEOM.safe_gap
 
 CROSS_START_Y = -18.0
-CROSS_CLEAR_Y = 18.0
 YELLOW_START_S = 0.6
 YELLOW_DURATION_S = 2.4
 RED_START_S = YELLOW_START_S + YELLOW_DURATION_S
@@ -56,6 +55,13 @@ def _red_start_from_context_arr(context_arr):
     if context_arr.shape[0] > red_idx:
         return context_arr[red_idx]
     return jnp.asarray(RED_START_S, dtype=jnp.float32)
+
+
+def _elapsed_time_from_context_arr(context_arr):
+    elapsed_idx = _CTX_EXTRA_OFFSET + 2
+    if context_arr.shape[0] > elapsed_idx:
+        return context_arr[elapsed_idx]
+    return jnp.asarray(0.0, dtype=jnp.float32)
 
 
 def _cross_traffic_noise(key, shape):
@@ -97,8 +103,10 @@ def _no_blocking_intersection_from_ego_traj(ego_traj):
     v = ego_traj[:, 2]
     in_box = jnp.logical_and(x > INTERSECTION_ENTRY_X, x < INTERSECTION_EXIT_X)
     stopped_in_box = jnp.logical_and(in_box, v < 1.0)
-    penetration = jnp.where(stopped_in_box, 1.0 + INTERSECTION_EXIT_X - x, -1.0)
-    return jnp.max(penetration)
+    stopped_penetration = jnp.where(stopped_in_box, 1.0 + INTERSECTION_EXIT_X - x, -1.0)
+    terminal_in_box = jnp.logical_and(ego_traj[-1, 0] > INTERSECTION_ENTRY_X, ego_traj[-1, 0] < INTERSECTION_EXIT_X)
+    terminal_penetration = jnp.where(terminal_in_box, 1.0 + INTERSECTION_EXIT_X - ego_traj[-1, 0], -1.0)
+    return jnp.maximum(jnp.max(stopped_penetration), terminal_penetration)
 
 
 def _time_grid(n_steps):
@@ -114,7 +122,11 @@ def _cross_traj_for_xi(xi, n_steps):
     lateral_offset = xi[XI_LATERAL_OFFSET]
     base_speed = 7.5 * speed_scale
     y = CROSS_START_Y + base_speed * (t - arrival_shift)
-    obey_stop_y = -0.5 * _GEOM.length - 1.5
+    obey_stop_y = (
+        _SCENARIO.road.road_min_y
+        - 0.5 * _GEOM.length
+        - _CROSS_OBEY_STOP_BUFFER
+    )
     obey_y = jnp.minimum(y, obey_stop_y)
     y = jnp.where(mode == MODE_OBEY, obey_y, y)
     x = jnp.full_like(y, CROSS_LANE_X + lateral_offset)
@@ -150,7 +162,9 @@ def _axis_aligned_pair_penetration(a_traj, b_traj):
     dy = jnp.abs(a_traj[:, 1] - b_traj[:, 1])
     min_dx = VEH_L + _GEOM.safe_gap
     min_dy = VEH_W + 0.5 * _GEOM.safe_gap
-    return jnp.maximum(min_dx - dx, min_dy - dy)
+    overlap_x = min_dx - dx
+    overlap_y = min_dy - dy
+    return jnp.minimum(overlap_x, overlap_y)
 
 
 def classify_ego_mode(ego_traj_np):
@@ -174,9 +188,28 @@ def classify_ego_mode(ego_traj_np):
     return "undecided"
 
 
-def _np_cross_traj_for_xi(xi, n_steps):
-    tr = _cross_traj_for_xi(jnp.asarray(xi), n_steps)
-    return np.asarray(tr, dtype=float)
+def _np_cross_traj_for_xi(xi, n_steps, *, dt=DT_C):
+    """NumPy cross-traffic rollout for display metrics sampled at dt."""
+    xi = np.asarray(xi, dtype=float)
+    t = np.arange(n_steps, dtype=float) * float(dt)
+    mode = int(xi[XI_MODE])
+    arrival_shift = float(xi[XI_ARRIVAL_SHIFT])
+    speed_scale = float(xi[XI_SPEED_SCALE])
+    lateral_offset = float(xi[XI_LATERAL_OFFSET])
+    base_speed = 7.5 * speed_scale
+    y = CROSS_START_Y + base_speed * (t - arrival_shift)
+    if mode == MODE_OBEY:
+        obey_stop_y = (
+            _SCENARIO.road.road_min_y
+            - 0.5 * _GEOM.length
+            - _CROSS_OBEY_STOP_BUFFER
+        )
+        y = np.minimum(y, obey_stop_y)
+    x = np.full_like(y, CROSS_LANE_X + lateral_offset)
+    v = np.full_like(y, base_speed)
+    psi = np.full_like(y, np.pi / 2.0)
+    zeros = np.zeros_like(y)
+    return np.stack([x, y, v, psi, zeros, zeros], axis=1)
 
 
 def _np_pair_clearance(a_traj, b_traj):
@@ -189,7 +222,7 @@ def _np_pair_clearance(a_traj, b_traj):
     dy = np.abs(a[:n, 1] - b[:n, 1])
     min_dx = VEH_L + _GEOM.safe_gap
     min_dy = VEH_W + 0.5 * _GEOM.safe_gap
-    penetration = np.maximum(min_dx - dx, min_dy - dy)
+    penetration = np.minimum(min_dx - dx, min_dy - dy)
     return float(-np.max(penetration))
 
 
@@ -203,17 +236,37 @@ def _np_red_legal(ego_traj):
     return bool(np.all(~red | legal))
 
 
+def np_red_legal_for_history(ego_traj, *, red_start_s, dt, time_offset_s=0.0):
+    """Evaluate red-light legality for a closed-loop history sampled at dt."""
+    ego = np.asarray(ego_traj, dtype=float)
+    if len(ego) == 0:
+        return True
+    t = float(time_offset_s) + np.arange(len(ego), dtype=float) * float(dt)
+    red = t >= float(red_start_s)
+    legal = (ego[:, 0] <= STOP_LINE_X) | (ego[:, 0] >= INTERSECTION_EXIT_X)
+    return bool(np.all(~red | legal))
+
+
 def _np_no_blocking(ego_traj):
     ego = np.asarray(ego_traj, dtype=float)
     if len(ego) == 0:
         return True
     x = ego[:, 0]
     v = ego[:, 2]
-    blocking = (x > INTERSECTION_ENTRY_X) & (x < INTERSECTION_EXIT_X) & (v < 1.0)
-    return bool(not np.any(blocking))
+    in_box = (x > INTERSECTION_ENTRY_X) & (x < INTERSECTION_EXIT_X)
+    stopped_in_box = in_box & (v < 1.0)
+    terminal_in_box = bool(in_box[-1])
+    return bool(not np.any(stopped_in_box) and not terminal_in_box)
 
 
-def estimate_visual_metrics(ego_traj_np, n_samples=60):
+def estimate_visual_metrics(
+    ego_traj_np,
+    n_samples=60,
+    *,
+    red_start_s=RED_START_S,
+    dt=DT_C,
+    time_offset_s=0.0,
+):
     """Compute display-only intersection metrics from one ego trajectory."""
     ego = np.asarray(ego_traj_np, dtype=float)
     samples = np.asarray(_cross_traffic_noise(None, (n_samples,)), dtype=float)
@@ -223,7 +276,7 @@ def estimate_visual_metrics(ego_traj_np, n_samples=60):
     else:
         clearances = np.array(
             [
-                _np_pair_clearance(ego, _np_cross_traj_for_xi(xi, len(ego)))
+                _np_pair_clearance(ego, _np_cross_traj_for_xi(xi, len(ego), dt=dt))
                 for xi in samples
             ],
             dtype=float,
@@ -233,7 +286,12 @@ def estimate_visual_metrics(ego_traj_np, n_samples=60):
         "mode": classify_ego_mode(ego),
         "min_clearance": float(np.min(clearances)),
         "risk_quantile": float(np.quantile(-clearances, 0.9)),
-        "red_legal": _np_red_legal(ego),
+        "red_legal": np_red_legal_for_history(
+            ego,
+            red_start_s=red_start_s,
+            dt=dt,
+            time_offset_s=time_offset_s,
+        ),
         "no_blocking": _np_no_blocking(ego),
         "critical_sample": critical,
     }
@@ -258,12 +316,36 @@ def _ego_road_boundary_violation(x, ctx):
 def _ego_red_light_violation(x, ctx):
     del x
     ego = _ego_traj(ctx)
-    t = _time_grid(ego.shape[0])
-    red = t >= _red_start_from_context_arr(ctx["context_arr"])
+    elapsed_time = _elapsed_time_from_context_arr(ctx["context_arr"])
+    red_start = _red_start_from_context_arr(ctx["context_arr"])
+    t = _time_grid(ego.shape[0]) + elapsed_time
+    red = t >= red_start
     before_stop = ego[:, 0] <= STOP_LINE_X
     cleared = ego[:, 0] >= INTERSECTION_EXIT_X
     legal = jnp.logical_or(before_stop, cleared)
-    return jnp.max(jnp.where(jnp.logical_and(red, jnp.logical_not(legal)), 1.0, -1.0))
+    illegal_red = jnp.logical_and(red, jnp.logical_not(legal))
+    inside_depth = jnp.minimum(ego[:, 0] - STOP_LINE_X, INTERSECTION_EXIT_X - ego[:, 0])
+    red_occupancy = jnp.where(illegal_red, 1.0 + jnp.maximum(inside_depth, 0.0), -1.0)
+
+    # If red begins inside this prediction horizon, require the predicted state
+    # at red onset to already be either stopped before the line or cleared.
+    red_idx = jnp.argmin(jnp.abs(t - red_start))
+    red_in_horizon = jnp.logical_and(red_start >= t[0], red_start <= t[-1])
+    onset_x = ego[red_idx, 0]
+    onset_v = ego[red_idx, 2]
+    stop_violation = jnp.maximum(onset_x - STOP_LINE_X, onset_v - 1.0)
+    clear_violation = INTERSECTION_EXIT_X - onset_x
+    onset_violation = jnp.minimum(stop_violation, clear_violation)
+    onset_violation = jnp.where(red_in_horizon, onset_violation, -1.0)
+
+    cleared_before_red = jnp.any(jnp.logical_and(t <= red_start, cleared))
+    stopping_distance = ego[:, 2] ** 2 / (2.0 * MAX_ACC)
+    stop_feasibility = ego[:, 0] + stopping_distance - STOP_LINE_X
+    stop_candidate = jnp.logical_and(t <= red_start, before_stop)
+    stop_commitment = jnp.min(jnp.where(stop_candidate, stop_feasibility, 1.0))
+    needs_stop_commitment = jnp.logical_and(red_in_horizon, jnp.logical_not(cleared_before_red))
+    stop_commitment = jnp.where(needs_stop_commitment, stop_commitment, -1.0)
+    return jnp.maximum(jnp.maximum(jnp.max(red_occupancy), onset_violation), stop_commitment)
 
 
 def _no_blocking_intersection_violation(x, ctx):

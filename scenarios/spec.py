@@ -141,6 +141,8 @@ class ScenarioSpec:
     vehicle_geometry: VehicleGeometrySpec = VehicleGeometrySpec(5.0, 2.0, 3.0)
     context_values: Tuple[float, ...] = ()
     notes: Tuple[str, ...] = ()
+    exec_mode: str | None = None
+    initial_component_means: Tuple[Tuple[float, ...], ...] = ()
 
     def __post_init__(self):
         """Validate that the scenario can be decoded into a solver layout."""

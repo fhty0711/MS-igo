@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from config import DT
 from planner import plan
 from viz_utils import generic_legend_handles, render_agents_panel
 
@@ -57,6 +58,7 @@ class GenericScenarioBackend:
             cost_profile=self.cost_profile,
             scenario=self.scenario,
             solver_spec=self.scenario.solver_spec,
+            elapsed_time_s=step_idx * DT,
         )
 
         states_by_agent = self._states_by_agent()
@@ -108,6 +110,7 @@ class GenericScenarioBackend:
             x_win=x_win,
             title=title,
             show_step=show_step,
+            elapsed_time_s=idx * DT,
         )
 
     def legend_handles(self):

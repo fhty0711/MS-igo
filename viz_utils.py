@@ -120,6 +120,7 @@ def render_agents_panel(
     x_win=58.0,
     title="",
     show_step=3,
+    elapsed_time_s=0.0,
 ):
     """Render a road panel for any scenario described by AgentSpec."""
     focus_agent = focus_agent or scenario.agent_names[0]
@@ -140,7 +141,13 @@ def render_agents_panel(
     if scenario.name.startswith("signalized_intersection"):
         import viz_signalized
 
-        viz_signalized.draw_signalized_scene(ax, scenario, x_min, x_max)
+        viz_signalized.draw_signalized_scene(
+            ax,
+            scenario,
+            x_min,
+            x_max,
+            elapsed_time_s=elapsed_time_s,
+        )
 
     micro_per_macro = SUB_STEPS
     color_by_agent = {
@@ -190,7 +197,12 @@ def render_agents_panel(
                 import viz_signalized
 
                 viz_signalized.draw_cross_traffic_cloud(ax, scenario, ego_traj=best)
-                viz_signalized.draw_intersection_metrics(ax, best)
+                viz_signalized.draw_intersection_metrics(
+                    ax,
+                    best,
+                    red_start_s=float(scenario.context_values[1]),
+                    time_offset_s=elapsed_time_s,
+                )
     elif scenario.name.startswith("signalized_intersection"):
         import viz_signalized
 

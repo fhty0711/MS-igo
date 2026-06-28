@@ -157,6 +157,7 @@ def plan(
     cost_profile=None,
     scenario=None,
     solver_spec=None,
+    elapsed_time_s=0.0,
 ):
     """
     博弈 MGIGO 规划一步。
@@ -196,6 +197,7 @@ def plan(
         jnp.asarray(current_states.reshape(-1), dtype=jnp.float32),
         jnp.asarray(v_refs, dtype=jnp.float32),
         jnp.asarray(scenario.context_values, dtype=jnp.float32),
+        jnp.asarray([elapsed_time_s], dtype=jnp.float32),
     ])
     fitness_fn = make_fitness_fn(cost_profile)
 
@@ -216,6 +218,13 @@ def plan(
             0.0, INIT_MU_NOISE_STD,
             size=(n_blocks, K_COMP, solver_width),
         ).astype(np.float32)
+        for block_idx, component_values in enumerate(scenario.initial_component_means):
+            if block_idx >= n_blocks:
+                break
+            for comp_idx, value in enumerate(component_values):
+                if comp_idx >= K_COMP:
+                    break
+                mu0[block_idx, comp_idx, :block_dims[block_idx]] += float(value)
         L_inv0 = L_identity
         v0 = v_zeros
         prev_exec_k = None
@@ -261,7 +270,7 @@ def plan(
     final_L_np  = np.array(final_L)
 
     # ── 选择执行分量 ───────────────────────────────────────────────────
-    exec_mode = EXEC_MODE.lower()
+    exec_mode = (scenario.exec_mode or EXEC_MODE).lower()
     if exec_mode == "weight_mean":
         exec_k = select_components_by_weight(
             final_pi_np, block_to_agent, prev_exec_k

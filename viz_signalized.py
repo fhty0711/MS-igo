@@ -1,6 +1,7 @@
 """NuPlan-style semantic rendering for signalized-intersection scenarios."""
 
 import matplotlib.patches as mpatches
+import matplotlib.transforms as mtransforms
 import numpy as np
 
 from config import SUB_STEPS
@@ -16,8 +17,12 @@ STOP_LINE = "#f8fafc"
 CONFLICT = "#f59e0b"
 CROSSWALK = "#e5e7eb"
 SIGNAL_POST = "#94a3b8"
+SIGNAL_GREEN = "#22c55e"
 SIGNAL_YELLOW = "#facc15"
 SIGNAL_RED = "#ef4444"
+
+CROSS_FOOTPRINT_ALPHA = 0.055
+CROSS_FOOTPRINT_CRITICAL_ALPHA = 0.24
 
 
 def _add_patch(ax, patch, gid, zorder):
@@ -25,6 +30,68 @@ def _add_patch(ax, patch, gid, zorder):
     patch.set_zorder(zorder)
     ax.add_patch(patch)
     return patch
+
+
+def _draw_vehicle_footprint(
+    ax,
+    *,
+    center_x,
+    center_y,
+    heading,
+    length,
+    width,
+    color,
+    alpha,
+    linewidth,
+    zorder,
+    gid,
+):
+    """Draw a top-down oriented vehicle footprint centered on a trajectory state."""
+    patch = mpatches.Rectangle(
+        (center_x - 0.5 * length, center_y - 0.5 * width),
+        length,
+        width,
+        facecolor=color,
+        edgecolor=color,
+        linewidth=linewidth,
+        alpha=alpha,
+    )
+    transform = (
+        mtransforms.Affine2D().rotate_around(center_x, center_y, heading)
+        + ax.transData
+    )
+    patch.set_transform(transform)
+    return _add_patch(ax, patch, gid, zorder)
+
+
+def _draw_cross_traffic_legend(ax, mode_colors):
+    handles = [
+        mpatches.Patch(facecolor=mode_colors["obey"], edgecolor="none", label="obey"),
+        mpatches.Patch(
+            facecolor=mode_colors["yellow_rush"],
+            edgecolor="none",
+            label="yellow-rush",
+        ),
+        mpatches.Patch(
+            facecolor=mode_colors["red_run"],
+            edgecolor="none",
+            label="red-run",
+        ),
+    ]
+    legend = ax.legend(
+        handles=handles,
+        loc="lower right",
+        fontsize=6.5,
+        frameon=True,
+        framealpha=0.78,
+        facecolor="#020617",
+        edgecolor="#475569",
+        labelcolor="#e5e7eb",
+        borderpad=0.35,
+        handlelength=1.1,
+        handletextpad=0.45,
+    )
+    legend.set_zorder(21)
 
 
 def semantic_layer_summary(scenario):
@@ -103,7 +170,20 @@ def _draw_crosswalks(ax, scenario):
             )
 
 
-def draw_signalized_scene(ax, scenario, x_min, x_max):
+def _signal_phase(scenario, elapsed_time_s):
+    """Return active signal phase from scenario context timing."""
+    if len(scenario.context_values) < 2:
+        return "green"
+    yellow_start_s, red_start_s = scenario.context_values[:2]
+    elapsed = float(elapsed_time_s)
+    if elapsed < float(yellow_start_s):
+        return "green"
+    if elapsed < float(red_start_s):
+        return "yellow"
+    return "red"
+
+
+def draw_signalized_scene(ax, scenario, x_min, x_max, elapsed_time_s=0.0):
     """Draw a top-down semantic intersection map."""
     from costs import signalized_intersection as si
     from scenarios import signalized_intersection as sig
@@ -227,32 +307,48 @@ def draw_signalized_scene(ax, scenario, x_min, x_max):
 
     lamp_x = si.STOP_LINE_X + 2.2
     lamp_y = road_max + 1.1
+    phase = _signal_phase(scenario, elapsed_time_s)
     ax.plot(
         [lamp_x, lamp_x],
-        [road_max + 0.1, lamp_y - 0.35],
+        [road_max + 0.1, lamp_y - 0.85],
         color=SIGNAL_POST,
         lw=1.7,
         zorder=10,
     )
     _add_patch(
         ax,
-        mpatches.Circle(
-            (lamp_x, lamp_y),
-            0.48,
+        mpatches.FancyBboxPatch(
+            (lamp_x - 0.58, lamp_y - 0.92),
+            1.16,
+            1.84,
+            boxstyle="round,pad=0.08,rounding_size=0.18",
             facecolor="#0f172a",
             edgecolor=LANE_EDGE,
-            linewidth=0.8,
+            linewidth=0.75,
         ),
         "traffic_signal",
         11,
     )
-    ax.scatter(
-        [lamp_x - 0.14, lamp_x + 0.14],
-        [lamp_y, lamp_y],
-        s=[42, 42],
-        color=[SIGNAL_YELLOW, SIGNAL_RED],
-        zorder=12,
+    lamp_specs = (
+        ("red", SIGNAL_RED, lamp_y + 0.55),
+        ("yellow", SIGNAL_YELLOW, lamp_y),
+        ("green", SIGNAL_GREEN, lamp_y - 0.55),
     )
+    for name, color, y in lamp_specs:
+        active = name == phase
+        _add_patch(
+            ax,
+            mpatches.Circle(
+                (lamp_x, y),
+                0.27 if active else 0.21,
+                facecolor=color,
+                edgecolor="#f8fafc" if active else "none",
+                linewidth=0.65 if active else 0.0,
+                alpha=0.96 if active else 0.22,
+            ),
+            f"traffic_signal_{name}_{'active' if active else 'inactive'}",
+            12 if active else 11,
+        )
 
 
 def draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
@@ -266,12 +362,18 @@ def draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
     if ego_traj is not None:
         metrics = si.estimate_visual_metrics(ego_traj, n_samples=30)
         critical_xi = np.asarray(metrics["critical_sample"], dtype=float)
+    mode_colors = {
+        "obey": "#38bdf8",
+        "yellow_rush": "#facc15",
+        "red_run": "#fb7185",
+    }
+    geom = scenario.vehicle_geometry
     for xi in samples:
         mode = int(xi[si.XI_MODE])
         color = {
-            si.MODE_OBEY: "#38bdf8",
-            si.MODE_YELLOW_RUSH: "#facc15",
-            si.MODE_RED_RUN: "#fb7185",
+            si.MODE_OBEY: mode_colors["obey"],
+            si.MODE_YELLOW_RUSH: mode_colors["yellow_rush"],
+            si.MODE_RED_RUN: mode_colors["red_run"],
         }.get(mode, "#ffffff")
         tr = np.asarray(si._cross_traj_for_xi(jnp.asarray(xi), n_steps))
         is_critical = critical_xi is not None and np.allclose(xi, critical_xi)
@@ -283,6 +385,28 @@ def draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
             alpha=0.78 if is_critical else 0.16,
             zorder=9 if is_critical else 6,
         )
+        footprint_stride = max(len(tr) // (7 if is_critical else 5), 1)
+        footprint_idx = range(0, len(tr), footprint_stride)
+        for idx in footprint_idx:
+            _draw_vehicle_footprint(
+                ax,
+                center_x=float(tr[idx, 0]),
+                center_y=float(tr[idx, 1]),
+                heading=float(tr[idx, 3]),
+                length=geom.length,
+                width=geom.width,
+                color=color,
+                alpha=(
+                    CROSS_FOOTPRINT_CRITICAL_ALPHA
+                    if is_critical
+                    else CROSS_FOOTPRINT_ALPHA
+                ),
+                linewidth=1.0 if is_critical else 0.25,
+                zorder=11 if is_critical else 7,
+                gid="cross_vehicle_critical"
+                if is_critical
+                else "cross_vehicle_sample",
+            )
         if is_critical:
             stride = max(len(tr) // 5, 1)
             ax.scatter(
@@ -293,13 +417,31 @@ def draw_cross_traffic_cloud(ax, scenario, ego_traj=None):
                 alpha=0.9,
                 zorder=10,
             )
+    _draw_cross_traffic_legend(ax, mode_colors)
 
 
-def draw_intersection_metrics(ax, ego_traj):
+def draw_intersection_metrics(
+    ax,
+    ego_traj,
+    *,
+    red_start_s=None,
+    dt=None,
+    time_offset_s=0.0,
+):
     """Draw compact display-only signalized-intersection metrics."""
     from costs import signalized_intersection as si
 
-    metrics = si.estimate_visual_metrics(ego_traj, n_samples=40)
+    kwargs = {}
+    if red_start_s is not None:
+        kwargs["red_start_s"] = red_start_s
+    if dt is not None:
+        kwargs["dt"] = dt
+    metrics = si.estimate_visual_metrics(
+        ego_traj,
+        n_samples=40,
+        time_offset_s=time_offset_s,
+        **kwargs,
+    )
     text = (
         f"mode {metrics['mode']}\n"
         f"clear {metrics['min_clearance']:.1f} m\n"

@@ -1,0 +1,31 @@
+{
+  "generated_at": "2026-06-28T23:57:35",
+  "scheme": "A",
+  "scope": "single optimizing ego with exogenous probabilistic cross traffic",
+  "scenarios": [
+    "signalized_intersection_easy_pass",
+    "signalized_intersection_must_stop",
+    "signalized_intersection_critical"
+  ],
+  "cost_profiles": [
+    "signalized_intersection",
+    "signalized_intersection_no_chance",
+    "signalized_intersection_single_mode",
+    "signalized_intersection_soft_dilemma"
+  ],
+  "n_records": 12,
+  "force_rerun": false,
+  "dt": 0.5,
+  "rng_seed": 42,
+  "optimization_cross_traffic_samples": 40,
+  "evaluation_cross_traffic_samples": 80,
+  "jax_devices": [
+    "cuda:0"
+  ],
+  "outputs": {
+    "summary_csv": "/mnt/d/claude_workspace1/igo/figures/signalized_intersection_comparison/summary.csv",
+    "trajectory_overview": "/mnt/d/claude_workspace1/igo/figures/signalized_intersection_comparison/overview_trajectories.png",
+    "metrics_overview": "/mnt/d/claude_workspace1/igo/figures/signalized_intersection_comparison/overview_metrics.png",
+    "outcome_overview": "/mnt/d/claude_workspace1/igo/figures/signalized_intersection_comparison/overview_outcomes.png"
+  }
+}
