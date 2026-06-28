@@ -43,6 +43,13 @@ DEFAULT_COSTS = (
     "signalized_intersection_single_mode",
     "signalized_intersection_soft_dilemma",
 )
+OUTCOME_METRICS = (
+    "mode_outcome",
+    "red_legal",
+    "no_blocking",
+    "cleared_intersection",
+    "stopped_before_line",
+)
 
 
 @dataclass
@@ -198,6 +205,50 @@ def _plot_metrics_overview(records: list[RunRecord], scenarios: tuple[str, ...],
     print(f"[save] {path}")
 
 
+def _plot_outcome_overview(records: list[RunRecord], scenarios: tuple[str, ...], costs: tuple[str, ...]):
+    by_key = {(r.scenario_name, r.cost_profile): r for r in records}
+    palette = ("#40d984", "#ffb454", "#7aa2ff", "#f06595")
+    colors = {cost: palette[idx % len(palette)] for idx, cost in enumerate(costs)}
+    mode_to_value = {"stop": 0.0, "undecided": 0.5, "pass": 1.0}
+
+    fig, axes = plt.subplots(3, 2, figsize=(12.5, 9.0), squeeze=False)
+    fig.patch.set_facecolor("#0a1120")
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.90, bottom=0.08, wspace=0.22, hspace=0.42)
+    fig.suptitle("Signalized Intersection Outcomes", color="white", fontsize=15)
+    x = np.arange(len(scenarios))
+    width = 0.18
+
+    for ax, metric in zip(axes.ravel(), OUTCOME_METRICS):
+        ax.set_facecolor("#10192b")
+        for idx, cost in enumerate(costs):
+            values = []
+            for scenario_name in scenarios:
+                raw = by_key[(scenario_name, cost)].metrics[metric if metric != "mode_outcome" else "mode"]
+                values.append(mode_to_value[str(raw)] if metric == "mode_outcome" else float(bool(raw)))
+            offset = (idx - 1.5) * width
+            ax.bar(x + offset, values, width=width, color=colors[cost], label=_short_cost_label(cost))
+        ax.set_xticks(x)
+        ax.set_xticklabels([_short_scenario_label(name) for name in scenarios], color="white", fontsize=8)
+        ax.set_ylim(-0.05, 1.05)
+        if metric == "mode_outcome":
+            ax.set_yticks([0.0, 0.5, 1.0])
+            ax.set_yticklabels(["stop", "undecided", "pass"], color="white", fontsize=8)
+        else:
+            ax.set_yticks([0.0, 1.0])
+            ax.set_yticklabels(["false", "true"], color="white", fontsize=8)
+        ax.tick_params(colors="white", labelsize=8)
+        ax.grid(axis="y", color="white", alpha=0.12, lw=0.6)
+        for spine in ax.spines.values():
+            spine.set_color("#40506b")
+        ax.set_title(metric, color="white", fontsize=10)
+    axes.ravel()[-1].axis("off")
+    axes[0, 1].legend(facecolor="#0a1120", edgecolor="#40506b", labelcolor="white", fontsize=8)
+    path = os.path.join(OUT_DIR, "overview_outcomes.png")
+    fig.savefig(path, dpi=180, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    print(f"[save] {path}")
+
+
 def _write_summary_csv(records: list[RunRecord]):
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, "summary.csv")
@@ -253,6 +304,7 @@ def main():
     _write_summary_csv(records)
     _plot_trajectory_overview(records, scenarios, costs)
     _plot_metrics_overview(records, scenarios, costs)
+    _plot_outcome_overview(records, scenarios, costs)
     print("[done] signalized-intersection comparison complete")
 
 

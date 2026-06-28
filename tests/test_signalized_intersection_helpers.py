@@ -218,6 +218,15 @@ def test_signalized_intersection_comparison_runner_contract():
         raise AssertionError(compare.DEFAULT_SCENARIOS)
     if compare.DEFAULT_COSTS != expected_costs:
         raise AssertionError(compare.DEFAULT_COSTS)
+    expected_outcomes = (
+        "mode_outcome",
+        "red_legal",
+        "no_blocking",
+        "cleared_intersection",
+        "stopped_before_line",
+    )
+    if compare.OUTCOME_METRICS != expected_outcomes:
+        raise AssertionError(compare.OUTCOME_METRICS)
 
     scenario = get_scenario("signalized_intersection")
     ego = np.array(
@@ -280,6 +289,8 @@ def test_signalized_intersection_report_rows_render():
             raise AssertionError(token)
     if "<table>" not in html or "Signalized Intersection" not in html:
         raise AssertionError(html[:200])
+    if "overview_outcomes.png" not in markdown or "overview_outcomes.png" not in html:
+        raise AssertionError("report should include outcome metrics figure")
 
 
 def test_signalized_intersection_render_smoke():

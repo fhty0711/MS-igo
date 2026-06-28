@@ -19,6 +19,7 @@ SUMMARY_CSV = COMPARE_DIR / "summary.csv"
 FIGURES = {
     "trajectories": COMPARE_DIR / "overview_trajectories.png",
     "metrics": COMPARE_DIR / "overview_metrics.png",
+    "outcomes": COMPARE_DIR / "overview_outcomes.png",
 }
 
 
@@ -137,6 +138,7 @@ cross-traffic violations aggregated by a chance constraint.
 
 - `assets/overview_trajectories.png`
 - `assets/overview_metrics.png`
+- `assets/overview_outcomes.png`
 
 ## Reproduction
 
@@ -213,6 +215,8 @@ def _build_html(rows: list[dict[str, str]], generated: str | None = None) -> str
   <img src="assets/overview_trajectories.png" alt="trajectory overview">
   <h3>Metrics Overview</h3>
   <img src="assets/overview_metrics.png" alt="metrics overview">
+  <h3>Outcome Overview</h3>
+  <img src="assets/overview_outcomes.png" alt="outcome overview">
 
   <h2>Reproduction</h2>
   <pre><code>cd /mnt/d/claude_workspace1/igo
