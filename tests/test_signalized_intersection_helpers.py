@@ -27,6 +27,51 @@ def test_signalized_intersection_scenario_contract():
         raise AssertionError("signalized benchmark should seed stop/pass mixture components")
 
 
+def test_scenario_spec_accepts_bspline_decision_kinds():
+    import numpy as np
+
+    from scenarios.spec import AgentSpec, BlockSpec, DecisionSpec, ScenarioSpec, state
+
+    scenario = ScenarioSpec(
+        name="bspline_contract",
+        title="B-spline contract",
+        description="ScenarioSpec should accept Frenet B-spline decision vectors.",
+        output_prefix="bspline_contract",
+        cost_profile="signalized_intersection",
+        initial_states=np.array([state(0.0, 0.0, 10.0)]),
+        v_refs=np.array([10.0]),
+        target_y=0.0,
+        lane_roles=("ego",),
+        agent_roles=("ego",),
+        agents=(
+            AgentSpec(
+                name="ego",
+                role="ego",
+                dynamics="bicycle",
+                state_index=0,
+                reference_index=0,
+            ),
+        ),
+        decisions=(
+            DecisionSpec("ego_ctrl_s", "ego", "ctrl_s", (7,)),
+            DecisionSpec("ego_ctrl_d", "ego", "ctrl_d", (5,)),
+        ),
+        blocks=(
+            BlockSpec("ego_ctrl_s", "ego", ("ego_ctrl_s",), 0),
+            BlockSpec("ego_ctrl_d", "ego", ("ego_ctrl_d",), 1),
+        ),
+        snap_labels=("start", "middle", "end"),
+        trajectory_model="frenet_bspline",
+        control_horizon=12,
+        initial_component_means=(((0.0, 5.0, 12.0), (0.0, 0.0, 0.0)),),
+    )
+
+    if scenario.trajectory_model != "frenet_bspline":
+        raise AssertionError(scenario.trajectory_model)
+    if scenario.solver_spec.block_dims != (7, 5):
+        raise AssertionError(scenario.solver_spec.block_dims)
+
+
 def test_signalized_intersection_uses_double_lane_intersection_geometry():
     from scenarios import get_scenario
     from scenarios import signalized_intersection as geom
@@ -1094,6 +1139,7 @@ def test_signalized_cross_traffic_cloud_draws_vehicle_footprint_patches():
 
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
+    test_scenario_spec_accepts_bspline_decision_kinds()
     test_signalized_intersection_uses_double_lane_intersection_geometry()
     test_signalized_intersection_variants_are_registered()
     test_signalized_intersection_variant_timing_order()

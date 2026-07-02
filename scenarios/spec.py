@@ -18,7 +18,8 @@ import numpy as np
 
 
 DynamicsProfile = Literal["bicycle", "longitudinal"]
-ControlKind = Literal["acc", "steer"]
+ControlKind = Literal["acc", "steer", "ctrl_s", "ctrl_d"]
+TrajectoryModel = Literal["control_sequence", "frenet_bspline"]
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,8 @@ class ScenarioSpec:
     context_values: Tuple[float, ...] = ()
     notes: Tuple[str, ...] = ()
     exec_mode: str | None = None
-    initial_component_means: Tuple[Tuple[float, ...], ...] = ()
+    trajectory_model: TrajectoryModel = "control_sequence"
+    initial_component_means: Tuple[tuple, ...] = ()
 
     def __post_init__(self):
         """Validate that the scenario can be decoded into a solver layout."""
@@ -190,21 +192,36 @@ class ScenarioSpec:
 
         known_agents = set(agent_names)
         known_decisions = set(decision_names)
+        if self.trajectory_model not in ("control_sequence", "frenet_bspline"):
+            raise ValueError(
+                f"Scenario {self.name!r} has unsupported trajectory_model "
+                f"{self.trajectory_model!r}"
+            )
         for decision in self.decisions:
             if decision.agent_name not in known_agents:
                 raise ValueError(
                     f"Decision {decision.name!r} references unknown agent "
                     f"{decision.agent_name!r}"
                 )
-            if decision.kind not in ("acc", "steer"):
+            if decision.kind not in ("acc", "steer", "ctrl_s", "ctrl_d"):
                 raise ValueError(
                     f"Decision {decision.name!r} has unsupported kind "
                     f"{decision.kind!r}"
                 )
-            if decision.shape != (self.control_horizon,):
+            if (
+                decision.kind in ("acc", "steer")
+                and decision.shape != (self.control_horizon,)
+            ):
                 raise ValueError(
                     f"Scalar control decision {decision.name!r} shape must be "
                     f"({self.control_horizon},), got {decision.shape}"
+                )
+            if decision.kind in ("ctrl_s", "ctrl_d") and (
+                len(decision.shape) != 1 or decision.shape[0] <= 0
+            ):
+                raise ValueError(
+                    f"B-spline decision {decision.name!r} shape must be a nonempty "
+                    f"1D flat vector, got {decision.shape}"
                 )
         for block in self.blocks:
             if block.owner_agent not in known_agents:
