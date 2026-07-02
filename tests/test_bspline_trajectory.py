@@ -40,6 +40,34 @@ def test_frenet_bspline_loads_basis_asset():
         raise AssertionError(gen.T)
 
 
+def test_bspline_rollout_returns_dense_ego_states():
+    from trajectory.frenet_bspline import FrenetBSplineTrajectory
+    from trajectory.reference_path import StraightReference
+    from trajectory.rollout import bspline_ego_rollout
+    from trajectory.warmstart import tangent_control_points
+
+    gen = FrenetBSplineTrajectory("trajectory/assets/bspline_basis.npz", StraightReference())
+    ctrl_s, ctrl_d = tangent_control_points(gen, s0=5.0, s_dot0=8.0, d0=0.5)
+    ctx = {
+        "s0": 5.0,
+        "s_dot0": 8.0,
+        "s_ddot0": 0.0,
+        "d0": 0.5,
+        "d_dot0": 0.0,
+        "d_ddot0": 0.0,
+    }
+
+    traj = bspline_ego_rollout(gen, jnp.asarray(ctrl_s), jnp.asarray(ctrl_d), ctx)
+
+    if traj.shape != (gen.T, 6):
+        raise AssertionError(traj.shape)
+    if not np.all(np.isfinite(np.asarray(traj))):
+        raise AssertionError(traj)
+    if not np.allclose(np.asarray(traj[0, :2]), np.array([5.0, 0.5]), atol=1e-5):
+        raise AssertionError(traj[0, :2])
+
+
 if __name__ == "__main__":
     test_straight_reference_path_maps_frenet_to_cartesian()
     test_frenet_bspline_loads_basis_asset()
+    test_bspline_rollout_returns_dense_ego_states()
