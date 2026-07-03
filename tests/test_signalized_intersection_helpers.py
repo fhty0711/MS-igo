@@ -72,6 +72,37 @@ def test_scenario_spec_accepts_bspline_decision_kinds():
         raise AssertionError(scenario.solver_spec.block_dims)
 
 
+def test_signalized_intersection_bspline_scenario_contract():
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection_bspline")
+    if scenario.name != "signalized_intersection_bspline":
+        raise AssertionError(scenario.name)
+    if scenario.trajectory_model != "frenet_bspline":
+        raise AssertionError(scenario.trajectory_model)
+    if scenario.cost_profile != "signalized_intersection_bspline":
+        raise AssertionError(scenario.cost_profile)
+    if scenario.agent_names != ("ego",):
+        raise AssertionError(scenario.agent_names)
+    if tuple(decision.name for decision in scenario.decisions) != (
+        "ego_ctrl_s",
+        "ego_ctrl_d",
+    ):
+        raise AssertionError(scenario.decisions)
+    if tuple(decision.kind for decision in scenario.decisions) != ("ctrl_s", "ctrl_d"):
+        raise AssertionError(scenario.decisions)
+    if scenario.solver_spec.block_dims != (9, 9):
+        raise AssertionError(scenario.solver_spec.block_dims)
+    if len(scenario.initial_component_means) != scenario.solver_spec.n_blocks:
+        raise AssertionError(scenario.initial_component_means)
+    for block_idx, block_means in enumerate(scenario.initial_component_means):
+        if len(block_means) < 3:
+            raise AssertionError(block_means)
+        for component_mean in block_means:
+            if len(component_mean) != scenario.solver_spec.block_dims[block_idx]:
+                raise AssertionError((block_idx, component_mean))
+
+
 def test_signalized_intersection_uses_double_lane_intersection_geometry():
     from scenarios import get_scenario
     from scenarios import signalized_intersection as geom
@@ -418,6 +449,143 @@ def test_planner_appends_elapsed_time_to_context():
         raise AssertionError(f"expected elapsed context 2.5, got {captured['context'][-1]}")
 
 
+def test_planner_accepts_vector_initial_component_means():
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+
+    import planner
+    from config import K_COMP
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection_bspline")
+    captured = {}
+
+    def fake_solver(**kwargs):
+        captured["initial_mu_k"] = np.asarray(kwargs["initial_mu_k"], dtype=float)
+        n_blocks = kwargs["N_blocks"]
+        width = max(kwargs["dims"])
+        mu = jnp.asarray(kwargs["initial_mu_k"], dtype=jnp.float32)
+        L = jnp.tile(
+            jnp.eye(width, dtype=jnp.float32)[None, None],
+            (n_blocks, K_COMP, 1, 1),
+        )
+        pi = jnp.ones((n_blocks, K_COMP), dtype=jnp.float32) / K_COMP
+        return mu, L, pi, None
+
+    old_solver = planner.mmog_igo_rne_blocks_solver
+    old_advance = planner.advance_one_macro_step
+    old_dense = planner.dense_rollout_np
+    old_prediction = planner.prediction_trajs
+    try:
+        planner.mmog_igo_rne_blocks_solver = fake_solver
+        planner.advance_one_macro_step = (
+            lambda _scenario, current_states, _decisions: np.asarray(current_states)
+        )
+        planner.dense_rollout_np = (
+            lambda _scenario, current_states, _decisions:
+            np.asarray(current_states, dtype=float)[None, :, :]
+        )
+        planner.prediction_trajs = (
+            lambda _scenario, current_states, _decisions:
+            {"ego": np.asarray(current_states, dtype=float)}
+        )
+        planner.plan(
+            jax.random.PRNGKey(0),
+            scenario.initial_states,
+            scenario.v_refs,
+            cost_profile=scenario.cost_profile,
+            scenario=scenario,
+            solver_spec=scenario.solver_spec,
+        )
+    finally:
+        planner.mmog_igo_rne_blocks_solver = old_solver
+        planner.advance_one_macro_step = old_advance
+        planner.dense_rollout_np = old_dense
+        planner.prediction_trajs = old_prediction
+
+    if "initial_mu_k" not in captured:
+        raise AssertionError("planner did not call solver")
+    mu0 = captured["initial_mu_k"]
+    for block_idx, block_means in enumerate(scenario.initial_component_means):
+        for comp_idx, expected in enumerate(block_means):
+            diff = mu0[block_idx, comp_idx, : scenario.solver_spec.block_dims[block_idx]] - np.asarray(expected)
+            if not np.max(np.abs(diff)) < 1.0:
+                raise AssertionError((block_idx, comp_idx, diff, expected))
+
+
+def test_planner_bspline_warm_start_keeps_monotone_longitudinal_seed():
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+
+    import planner
+    from config import K_COMP
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection_bspline")
+    captured = {}
+
+    def fake_solver(**kwargs):
+        captured["initial_mu_k"] = np.asarray(kwargs["initial_mu_k"], dtype=float)
+        n_blocks = kwargs["N_blocks"]
+        width = max(kwargs["dims"])
+        mu = jnp.asarray(kwargs["initial_mu_k"], dtype=jnp.float32)
+        L = jnp.tile(
+            jnp.eye(width, dtype=jnp.float32)[None, None],
+            (n_blocks, K_COMP, 1, 1),
+        )
+        pi = jnp.ones((n_blocks, K_COMP), dtype=jnp.float32) / K_COMP
+        return mu, L, pi, None
+
+    width = max(scenario.solver_spec.block_dims)
+    bad_prev = np.zeros((scenario.solver_spec.n_blocks, K_COMP, width), dtype=np.float32)
+    bad_selected = np.zeros((scenario.solver_spec.n_blocks, width), dtype=np.float32)
+    bad_selected[0, :] = np.linspace(15.0, 90.0, width, dtype=np.float32)
+    bad_selected[1, :] = scenario.initial_states[0, 1]
+    warm = (bad_prev, np.zeros((scenario.solver_spec.n_blocks,), dtype=np.int32), bad_selected)
+    current_states = scenario.initial_states.copy()
+    current_states[0, 0] = 25.0
+
+    old_solver = planner.mmog_igo_rne_blocks_solver
+    old_advance = planner.advance_one_macro_step
+    old_dense = planner.dense_rollout_np
+    old_prediction = planner.prediction_trajs
+    try:
+        planner.mmog_igo_rne_blocks_solver = fake_solver
+        planner.advance_one_macro_step = (
+            lambda _scenario, states, _decisions: np.asarray(states)
+        )
+        planner.dense_rollout_np = (
+            lambda _scenario, states, _decisions:
+            np.asarray(states, dtype=float)[None, :, :]
+        )
+        planner.prediction_trajs = (
+            lambda _scenario, states, _decisions:
+            {"ego": np.asarray(states, dtype=float)}
+        )
+        planner.plan(
+            jax.random.PRNGKey(0),
+            current_states,
+            scenario.v_refs,
+            warm=warm,
+            cost_profile=scenario.cost_profile,
+            scenario=scenario,
+            solver_spec=scenario.solver_spec,
+        )
+    finally:
+        planner.mmog_igo_rne_blocks_solver = old_solver
+        planner.advance_one_macro_step = old_advance
+        planner.dense_rollout_np = old_dense
+        planner.prediction_trajs = old_prediction
+
+    seed = captured["initial_mu_k"][0, 0, : scenario.solver_spec.block_dims[0]]
+    if np.any(np.diff(seed) <= 0.0):
+        raise AssertionError(seed)
+    if seed[0] < current_states[0, 0]:
+        raise AssertionError((seed, current_states[0, 0]))
+
+
 def test_signalized_intersection_cost_profile_contract():
     import jax.numpy as jnp
     from costs import get_cost_functions
@@ -551,6 +719,62 @@ def test_signalized_intersection_ablation_profiles_are_registered_and_finite():
         value = cost_functions[0](sample, context)
         if not bool(jnp.isfinite(value)):
             raise AssertionError(f"{profile} cost should be finite, got {value}")
+
+
+def test_signalized_intersection_bspline_cost_profile_is_registered_and_finite():
+    import jax.numpy as jnp
+    from costs import get_cost_functions
+    from scenarios import get_scenario
+
+    scenario = get_scenario("signalized_intersection_bspline")
+    cost_functions = get_cost_functions("signalized_intersection_bspline")
+    if len(cost_functions) != scenario.n_agents:
+        raise AssertionError((len(cost_functions), scenario.n_agents))
+
+    width = max(scenario.solver_spec.block_dims)
+    sample_blocks = jnp.zeros((scenario.solver_spec.n_blocks, width), dtype=jnp.float32)
+    for block_idx, block_means in enumerate(scenario.initial_component_means):
+        sample_blocks = sample_blocks.at[
+            block_idx, : scenario.solver_spec.block_dims[block_idx]
+        ].set(jnp.asarray(block_means[0], dtype=jnp.float32))
+    sample = sample_blocks.reshape(-1)
+    context = jnp.concatenate(
+        [
+            jnp.asarray(scenario.initial_states.reshape(-1), dtype=jnp.float32),
+            jnp.asarray(scenario.v_refs, dtype=jnp.float32),
+            jnp.asarray(scenario.context_values, dtype=jnp.float32),
+        ]
+    )
+    value = cost_functions[0](sample, context)
+    if not bool(jnp.isfinite(value)):
+        raise AssertionError(f"B-spline signalized cost should be finite, got {value}")
+
+
+def test_signalized_intersection_bspline_has_hard_physical_feasibility_layer():
+    import jax.numpy as jnp
+    from costs import signalized_intersection_bspline as cost
+    from config import MAX_SPEED
+
+    bad_traj = jnp.array(
+        [
+            [10.0, -1.75, 12.0, 0.0, 0.0, 0.0],
+            [20.0, -1.75, MAX_SPEED + 5.0, 0.0, 0.0, 0.0],
+            [18.0, -1.75, 12.0, 3.0, 0.0, 0.0],
+        ],
+        dtype=jnp.float32,
+    )
+    good_traj = jnp.array(
+        [
+            [10.0, -1.75, 12.0, 0.0, 0.0, 0.0],
+            [16.0, -1.75, 12.0, 0.0, 0.0, 0.0],
+            [22.0, -1.75, 12.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=jnp.float32,
+    )
+    if float(cost._bspline_physical_feasibility_violation_from_traj(bad_traj)) <= 0.0:
+        raise AssertionError("speed/reversal/heading violation should be positive")
+    if float(cost._bspline_physical_feasibility_violation_from_traj(good_traj)) > 0.0:
+        raise AssertionError("straight feasible B-spline rollout should satisfy the hard layer")
 
 
 def test_signalized_intersection_metrics_classify_stop_pass_and_blocking():
@@ -1140,6 +1364,7 @@ def test_signalized_cross_traffic_cloud_draws_vehicle_footprint_patches():
 if __name__ == "__main__":
     test_signalized_intersection_scenario_contract()
     test_scenario_spec_accepts_bspline_decision_kinds()
+    test_signalized_intersection_bspline_scenario_contract()
     test_signalized_intersection_uses_double_lane_intersection_geometry()
     test_signalized_intersection_variants_are_registered()
     test_signalized_intersection_variant_timing_order()
@@ -1153,10 +1378,14 @@ if __name__ == "__main__":
     test_red_light_violation_orders_illegal_depth_and_duration()
     test_red_light_violation_uses_elapsed_mpc_time()
     test_planner_appends_elapsed_time_to_context()
+    test_planner_accepts_vector_initial_component_means()
+    test_planner_bspline_warm_start_keeps_monotone_longitudinal_seed()
     test_signalized_intersection_cost_profile_contract()
     test_signalized_intersection_cost_hierarchy_uses_constran_presets()
     test_signalized_intersection_objective_tracks_ego_lane_center()
     test_signalized_intersection_ablation_profiles_are_registered_and_finite()
+    test_signalized_intersection_bspline_cost_profile_is_registered_and_finite()
+    test_signalized_intersection_bspline_has_hard_physical_feasibility_layer()
     test_signalized_intersection_metrics_classify_stop_pass_and_blocking()
     test_signalized_intersection_visual_metrics_have_expected_keys()
     test_signalized_intersection_comparison_runner_contract()

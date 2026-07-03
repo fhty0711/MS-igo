@@ -162,6 +162,60 @@ objective 不承担完整 stop/pass 语义，只提供较轻的 basin：
 
 ---
 
+## 5.5 B-spline 轨迹参数化版本
+
+新增并行场景：
+
+```text
+signalized_intersection_bspline
+```
+
+它不替换原来的 `acc/steer` 控制序列版本，而是增加一条 Frenet B-spline 参数化路径：
+
+- MG-IGO 优化 `ego_ctrl_s` 和 `ego_ctrl_d` 两个 9 维自由控制点 block。
+- B-spline rollout 输出压缩状态 `[x, y, v, psi, acc, steer]`，继续复用现有 scenario runtime、cost helper 和可视化。
+- cost 仍使用 `objective + g(x, ctx) <= 0`，并复用 red-light、road-boundary、no-blocking、cross-traffic chance、dilemma task 的 prioritized 语义。
+- 横向交通仍是外生概率行为模型，不作为 active optimizing agent。
+
+B-spline 版本额外加入 `bspline_physical_feasibility` hard layer，用来约束 B-spline 参数化自身的物理可行性：
+
+- 纵向控制多边形在 rollout 入口做单调、速度受限投影；
+- 轨迹速度不超过 `MAX_SPEED`；
+- 禁止纵向回退；
+- 限制异常航向、加速度和转角。
+
+这一步不是把交叉路口 cost 改成 LQ 或 smooth surrogate，而是防止无界绝对 B-spline 控制点生成车辆模型不可能执行的轨迹。换句话说，black-box prioritized risk/STL cost 保持不变，搜索空间改为更合理的轨迹参数化。
+
+当前 WSL2/CUDA 单场景验证命令：
+
+```bash
+cd /mnt/d/claude_workspace1/igo
+JAX_PLATFORMS=cuda /root/.venvs/tcmgigo-jaxgpu/bin/python run_mgigo_scenario.py signalized_intersection_bspline signalized_intersection_bspline
+```
+
+最近一次结果：
+
+```text
+第 0步  x=6.9m    y=-1.95m  v=13.8m/s
+第 5步  x=48.6m   y=-2.20m  v=18.8m/s
+第10步  x=105.9m  y=-1.61m  v=27.5m/s
+第15步  x=163.6m  y=-1.72m  v=25.9m/s
+第20步  x=235.3m  y=-1.73m  v=29.9m/s
+第25步  x=310.3m  y=-1.72m  v=30.0m/s
+第29步  x=370.3m  y=-1.71m  v=30.0m/s
+```
+
+生成文件：
+
+```text
+figures/mgigo_signalized_intersection_bspline_snapshot.png
+figures/mgigo_signalized_intersection_bspline.mp4
+```
+
+这个结果说明 B-spline 接入链路已经完整跑通：scenario registry、cost registry、planner vector warm-start、runtime execution、dense prediction 和 visualization 都能协同工作。它目前展示的是“B-spline 参数化可运行且物理边界受控”的最小版本；后续还需要把 B-spline 版本纳入批量 comparison/report，并继续优化 stop/pass 行为的展示性。
+
+---
+
 ## 6. 可视化
 
 当前可视化朝 nuPlan 风格迭代，重点是清楚表达场景语义，而不是只画一条轨迹：

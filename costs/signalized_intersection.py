@@ -109,13 +109,13 @@ def _no_blocking_intersection_from_ego_traj(ego_traj):
     return jnp.maximum(jnp.max(stopped_penetration), terminal_penetration)
 
 
-def _time_grid(n_steps):
-    return jnp.arange(n_steps, dtype=jnp.float32) * DT_C
+def _time_grid(n_steps, dt=DT_C):
+    return jnp.arange(n_steps, dtype=jnp.float32) * dt
 
 
-def _cross_traj_for_xi(xi, n_steps):
+def _cross_traj_for_xi(xi, n_steps, dt=DT_C):
     """Roll out one exogenous cross-traffic behavior sample."""
-    t = _time_grid(n_steps)
+    t = _time_grid(n_steps, dt=dt)
     mode = xi[XI_MODE]
     arrival_shift = xi[XI_ARRIVAL_SHIFT]
     speed_scale = xi[XI_SPEED_SCALE]
@@ -299,14 +299,21 @@ def estimate_visual_metrics(
 
 def _cross_traffic_risk_violation(x, xi, ctx):
     del x
-    ego = _ego_traj(ctx)
-    cross = _cross_traj_for_xi(xi, ego.shape[0])
+    return _cross_traffic_risk_violation_from_traj(_ego_traj(ctx), xi)
+
+
+def _cross_traffic_risk_violation_from_traj(ego, xi, dt=DT_C):
+    cross = _cross_traj_for_xi(xi, ego.shape[0], dt=dt)
     return jnp.max(_axis_aligned_pair_penetration(ego, cross))
 
 
 def _ego_road_boundary_violation(x, ctx):
     del x
-    ego_y = _ego_traj(ctx)[:, 1]
+    return _ego_road_boundary_violation_from_traj(_ego_traj(ctx))
+
+
+def _ego_road_boundary_violation_from_traj(ego):
+    ego_y = ego[:, 1]
     half_w = 0.5 * _GEOM.width
     road_min = _SCENARIO.road.road_min_y
     road_max = _SCENARIO.road.road_max_y
@@ -315,10 +322,13 @@ def _ego_road_boundary_violation(x, ctx):
 
 def _ego_red_light_violation(x, ctx):
     del x
-    ego = _ego_traj(ctx)
-    elapsed_time = _elapsed_time_from_context_arr(ctx["context_arr"])
-    red_start = _red_start_from_context_arr(ctx["context_arr"])
-    t = _time_grid(ego.shape[0]) + elapsed_time
+    return _ego_red_light_violation_from_traj(_ego_traj(ctx), ctx["context_arr"])
+
+
+def _ego_red_light_violation_from_traj(ego, context_arr, dt=DT_C):
+    elapsed_time = _elapsed_time_from_context_arr(context_arr)
+    red_start = _red_start_from_context_arr(context_arr)
+    t = _time_grid(ego.shape[0], dt=dt) + elapsed_time
     red = t >= red_start
     before_stop = ego[:, 0] <= STOP_LINE_X
     cleared = ego[:, 0] >= INTERSECTION_EXIT_X
@@ -350,12 +360,19 @@ def _ego_red_light_violation(x, ctx):
 
 def _no_blocking_intersection_violation(x, ctx):
     del x
-    return _no_blocking_intersection_from_ego_traj(_ego_traj(ctx))
+    return _no_blocking_intersection_violation_from_traj(_ego_traj(ctx))
+
+
+def _no_blocking_intersection_violation_from_traj(ego):
+    return _no_blocking_intersection_from_ego_traj(ego)
 
 
 def _dilemma_task_violation(x, ctx):
     del x
-    ego = _ego_traj(ctx)
+    return _dilemma_task_violation_from_traj(_ego_traj(ctx))
+
+
+def _dilemma_task_violation_from_traj(ego):
     stopped_before = jnp.min(jnp.where(ego[:, 0] <= STOP_LINE_X, ego[:, 2], 1e3)) - 1.0
     cleared = INTERSECTION_EXIT_X - jnp.max(ego[:, 0])
     return jnp.minimum(stopped_before, cleared)
@@ -365,18 +382,25 @@ def _ego_objective(x, ctx):
     del x
     ego = _ego_traj(ctx)
     decisions = ctx["decisions"]
-    v_ref = ctx["context_arr"][_CTX_STATE_DIM + _EGO.reference_index]
+    smoothness = (
+        jnp.sum(jnp.diff(decisions["ego_acc"]) ** 2)
+        + jnp.sum(jnp.diff(decisions["ego_steer"]) ** 2)
+    )
+    return _ego_objective_from_traj(ego, ctx["context_arr"], smoothness)
+
+
+def _ego_objective_from_traj(ego, context_arr, control_smoothness=0.0, dt=DT_C):
+    v_ref = context_arr[_CTX_STATE_DIM + _EGO.reference_index]
     stop_basin = (ego[-1, 0] - (STOP_LINE_X - 2.0)) ** 2 + 4.0 * ego[-1, 2] ** 2
     pass_basin = (ego[-1, 0] - (INTERSECTION_EXIT_X + 6.0)) ** 2
     mild_task = 0.05 * jnp.minimum(stop_basin, pass_basin)
-    speed = 0.2 * jnp.sum((ego[:, 2] - v_ref) ** 2 * DT_C)
-    lane = 4.0 * jnp.sum((ego[:, 1] - _SCENARIO.target_y) ** 2 * DT_C)
-    heading = 3.0 * jnp.sum(ego[:, 3] ** 2 * DT_C)
+    speed = 0.2 * jnp.sum((ego[:, 2] - v_ref) ** 2 * dt)
+    lane = 4.0 * jnp.sum((ego[:, 1] - _SCENARIO.target_y) ** 2 * dt)
+    heading = 3.0 * jnp.sum(ego[:, 3] ** 2 * dt)
     ctrl = 0.2 * (
         jnp.sum(ego[:, 4] ** 2)
         + jnp.sum(ego[:, 5] ** 2)
-        + jnp.sum(jnp.diff(decisions["ego_acc"]) ** 2)
-        + jnp.sum(jnp.diff(decisions["ego_steer"]) ** 2)
+        + control_smoothness
     )
     return mild_task + speed + lane + heading + ctrl
 

@@ -19,6 +19,7 @@ from .signalized_intersection import (
     make_must_stop_scenario as make_signalized_intersection_must_stop,
     make_scenario as make_signalized_intersection,
 )
+from .signalized_intersection_bspline import make_scenario as make_signalized_intersection_bspline
 from .spec import ScenarioSpec
 
 
@@ -29,6 +30,7 @@ SCENARIO_FACTORIES: Dict[str, Callable[[], ScenarioSpec]] = {
     "borrow_overtake_safe": make_borrow_overtake_safe,
     "highway_merge": make_highway_merge,
     "signalized_intersection": make_signalized_intersection,
+    "signalized_intersection_bspline": make_signalized_intersection_bspline,
     "signalized_intersection_critical": make_signalized_intersection_critical,
     "signalized_intersection_easy_pass": make_signalized_intersection_easy_pass,
     "signalized_intersection_must_stop": make_signalized_intersection_must_stop,

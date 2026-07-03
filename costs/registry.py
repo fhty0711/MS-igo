@@ -9,6 +9,7 @@ from . import (
     highway_merge,
     highway_merge_baseline,
     signalized_intersection,
+    signalized_intersection_bspline,
     signalized_intersection_no_chance,
     signalized_intersection_single_mode,
     signalized_intersection_soft_dilemma,
@@ -51,6 +52,9 @@ COST_PROFILES: Dict[str, CostFunctions] = {
     ),
     "signalized_intersection": (
         signalized_intersection.ego_cost,
+    ),
+    "signalized_intersection_bspline": (
+        signalized_intersection_bspline.ego_cost,
     ),
     "signalized_intersection_no_chance": (
         signalized_intersection_no_chance.ego_cost,

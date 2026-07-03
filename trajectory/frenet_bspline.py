@@ -6,7 +6,9 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
+from jax import lax
 
+from config import MAX_SPEED
 from .reference_path import ReferencePath
 
 
@@ -36,6 +38,20 @@ class FrenetBSplineTrajectory:
         p2 = 3.0 * p1 - 2.0 * p0 + (self.dt_knot**2 / 10.0) * a0
         return p0, p1, p2
 
+    def _speed_limited_ctrl_s_free(self, ctrl_s_free, p2_s, max_speed=MAX_SPEED):
+        """Project raw longitudinal control points to a monotone speed-bounded polygon."""
+        times = self.greville[3:]
+        prev_times = jnp.concatenate([self.greville[2:3], times[:-1]])
+        max_steps = float(max_speed) * jnp.maximum(times - prev_times, 1e-3)
+
+        def body(prev_s, item):
+            raw_s, max_step = item
+            next_s = jnp.clip(raw_s, prev_s, prev_s + max_step)
+            return next_s, next_s
+
+        _last, limited = lax.scan(body, p2_s, (ctrl_s_free, max_steps))
+        return limited
+
     def evaluate(
         self,
         ctrl_s_free,
@@ -49,6 +65,7 @@ class FrenetBSplineTrajectory:
     ):
         p0_s, p1_s, p2_s = self._clamped_3pts(s0, s_dot0, s_ddot0)
         p0_d, p1_d, p2_d = self._clamped_3pts(d0, d_dot0, d_ddot0)
+        ctrl_s_free = self._speed_limited_ctrl_s_free(ctrl_s_free, p2_s)
         ctrl_s = jnp.concatenate(
             [jnp.array([p0_s]), jnp.array([p1_s]), jnp.array([p2_s]), ctrl_s_free],
             axis=0,

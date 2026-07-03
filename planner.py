@@ -30,6 +30,10 @@ from scenario_runtime import (
     prediction_trajs,
 )
 from scenarios import get_scenario
+from trajectory.frenet_bspline import FrenetBSplineTrajectory
+from trajectory.reference_path import StraightReference
+from trajectory.rollout import bspline_context_from_state
+from trajectory.warmstart import tangent_control_points
 
 
 _DEFAULT_SCENARIO = get_scenario("highway_merge")
@@ -145,6 +149,30 @@ def _sample_block_z(final_pi_np, final_mu_np, final_L_np, rng, solver_spec=None)
     return z
 
 
+def _bspline_seed_blocks(scenario, current_states, solver_width):
+    """Return B-spline control-point blocks consistent with the current state."""
+    from pathlib import Path
+
+    basis_path = (
+        Path(__file__).resolve().parent
+        / "trajectory"
+        / "assets"
+        / "bspline_basis.npz"
+    )
+    gen = FrenetBSplineTrajectory(basis_path, StraightReference())
+    ctx = bspline_context_from_state(current_states[0])
+    ctrl_s, ctrl_d = tangent_control_points(
+        gen,
+        s0=float(ctx["s0"]),
+        s_dot0=float(ctx["s_dot0"]),
+        d0=float(ctx["d0"]),
+    )
+    seed = np.zeros((scenario.solver_spec.n_blocks, solver_width), dtype=np.float32)
+    seed[0, :len(ctrl_s)] = ctrl_s
+    seed[1, :len(ctrl_d)] = ctrl_d
+    return seed
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  博弈规划器入口
 # ══════════════════════════════════════════════════════════════════════════════
@@ -224,7 +252,18 @@ def plan(
             for comp_idx, value in enumerate(component_values):
                 if comp_idx >= K_COMP:
                     break
-                mu0[block_idx, comp_idx, :block_dims[block_idx]] += float(value)
+                value_arr = np.asarray(value, dtype=np.float32)
+                if value_arr.ndim == 0:
+                    mu0[block_idx, comp_idx, :block_dims[block_idx]] += float(value_arr)
+                elif value_arr.shape == (block_dims[block_idx],):
+                    mu0[block_idx, comp_idx, :block_dims[block_idx]] += value_arr
+                else:
+                    raise ValueError(
+                        "initial_component_means entries must be scalars or "
+                        f"vectors of length block_dim={block_dims[block_idx]}; "
+                        f"got shape {value_arr.shape} for block {block_idx}, "
+                        f"component {comp_idx}"
+                    )
         L_inv0 = L_identity
         v0 = v_zeros
         prev_exec_k = None
@@ -232,12 +271,24 @@ def plan(
     else:
         prev_mu_np, last_exec_k = warm[:2]
         prev_selected_blocks = np.asarray(warm[2], dtype=np.float32)
-        # Step 1: 用上轮实际执行的平滑序列 shift-1 → 新 component 0
-        # 这样 warm start 与真实闭环推进保持一致。
-        mu0 = _warm_start_mu(prev_mu_np, last_exec_k, rng,
-                             solver_spec=solver_spec,
-                             best_seqs=prev_selected_blocks,
-                             decoder=decoder)
+        # Step 1: 用上轮实际执行的平滑序列 shift-1 → 新 component 0。
+        # B-spline 决策是绝对控制点而非逐步控制序列，不能左移补零；
+        # 每个 MPC 步从当前状态重新生成 tangent control points 作为先验。
+        if scenario.trajectory_model == "frenet_bspline":
+            shifted_seed = _bspline_seed_blocks(scenario, current_states, solver_width)
+            noise = rng.normal(
+                0,
+                WARM_START_NOISE_STD,
+                size=(n_blocks, K_COMP, solver_width),
+            )
+            base = np.tile(shifted_seed[:, None, :], (1, K_COMP, 1))
+            k_mask = (np.arange(K_COMP) == 0)[None, :, None]
+            mu0 = np.where(k_mask, base, base + noise).astype(np.float32)
+        else:
+            mu0 = _warm_start_mu(prev_mu_np, last_exec_k, rng,
+                                 solver_spec=solver_spec,
+                                 best_seqs=prev_selected_blocks,
+                                 decoder=decoder)
         L_inv0 = L_identity
         v0 = v_zeros
         # Step 2: component 0 即上轮执行的延续，hysteresis 应向 0 bias
