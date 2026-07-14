@@ -9,10 +9,16 @@ viz_utils.py — 公路场景可视化工具
 """
 
 import matplotlib.patches as mpatches
-import matplotlib.transforms as transforms
 import numpy as np
 
 from config import LANE_W, N_LANES, SUB_STEPS
+from visualization.scene_renderer import (
+    LineLayer,
+    SceneRenderSpec,
+    VehicleLayer,
+    draw_vehicle_footprint,
+    render_scene,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -43,16 +49,20 @@ AGENT_COLORS = (
 def _draw_rect(ax, cx, cy, theta, length, width,
                color, alpha=1.0, zorder=5, edge_lw=0.8):
     """在 ax 上绘制一个以 (cx, cy) 为中心、偏航角 theta（rad）的车辆矩形。"""
-    rect = mpatches.Rectangle(
-        (-length / 2, -width / 2), length, width,
-        facecolor=color,
-        edgecolor="white" if edge_lw > 0 else "none",
-        linewidth=edge_lw, alpha=alpha,
+    return draw_vehicle_footprint(
+        ax,
+        VehicleLayer(
+            center=(float(cx), float(cy)),
+            heading=float(theta),
+            length=float(length),
+            width=float(width),
+            facecolor=color,
+            edgecolor="white" if edge_lw > 0 else "none",
+            linewidth=float(edge_lw),
+            alpha=float(alpha),
+            zorder=float(zorder),
+        ),
     )
-    t_ = transforms.Affine2D().rotate(theta).translate(cx, cy) + ax.transData
-    rect.set_transform(t_)
-    rect.set_zorder(zorder)
-    ax.add_patch(rect)
 
 
 def _draw_road(ax, x_min, x_max, road=None):
@@ -66,22 +76,53 @@ def _draw_road(ax, x_min, x_max, road=None):
         road_min = road.road_min_y
         road_max = road.road_max_y
 
-    ax.set_facecolor(ROAD_BG)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(road_min - 0.8, road_max + 0.8)
-    ax.set_aspect("equal", adjustable="box")
-    ax.axhline(road_min, color="white", lw=2.0, zorder=1)
-    ax.axhline(road_max, color="white", lw=2.0, zorder=1)
+    lines = [
+        LineLayer(
+            x=(float(x_min), float(x_max)),
+            y=(float(road_min), float(road_min)),
+            color="white",
+            linewidth=2.0,
+            zorder=1,
+            gid="road_boundary",
+        ),
+        LineLayer(
+            x=(float(x_min), float(x_max)),
+            y=(float(road_max), float(road_max)),
+            color="white",
+            linewidth=2.0,
+            zorder=1,
+            gid="road_boundary",
+        ),
+    ]
     for y0, y1 in zip(lane_centers[:-1], lane_centers[1:]):
         lane_mid = 0.5 * (y0 + y1)
         x = x_min
         while x < x_max:
-            ax.plot([x, x + 4.5], [lane_mid, lane_mid],
-                    color="white", lw=1.2, ls="--", alpha=0.7, zorder=1)
+            lines.append(
+                LineLayer(
+                    x=(float(x), float(x + 4.5)),
+                    y=(float(lane_mid), float(lane_mid)),
+                    color="white",
+                    linewidth=1.2,
+                    linestyle="--",
+                    alpha=0.7,
+                    zorder=1,
+                    gid="lane_divider",
+                )
+            )
             x += 9.0
-    ax.set_xticks([]); ax.set_yticks([])
-    for sp in ax.spines.values():
-        sp.set_visible(False)
+    render_scene(
+        ax,
+        SceneRenderSpec(
+            facecolor=ROAD_BG,
+            xlim=(float(x_min), float(x_max)),
+            ylim=(float(road_min - 0.8), float(road_max + 0.8)),
+            aspect="equal",
+            lines=tuple(lines),
+            hide_ticks=True,
+            hide_spines=True,
+        ),
+    )
 
 
 def _smooth_xy(points, samples_per_segment=8):
